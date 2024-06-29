@@ -143,7 +143,10 @@ const WeddInvitation = Schema({
         links: {
             type: Array
         },
-        images: {
+        images_prod: {
+            type: Array
+        },
+        images_dev: {
             type: Array
         },
         available: {
@@ -238,7 +241,10 @@ const WeddInvitation = Schema({
         image: {
             type: Boolean
         },
-        featured: {
+        featured_prod: {
+            type: String,
+        },
+        featured_dev: {
             type: String,
         },
         color: {
@@ -266,7 +272,10 @@ const WeddInvitation = Schema({
             type: Number
         },
 
-        gallery: {
+        gallery_prod: {
+            type: Array
+        },
+        gallery_dev: {
             type: Array
         },
         available: {

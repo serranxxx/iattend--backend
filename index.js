@@ -14,7 +14,7 @@ dbConnection();
 // Configuración de CORS para desarrollo
 const corsOptions = {
     origin: 'http://localhost:3000', // Cambia esto por el puerto que estés utilizando para tu aplicación de frontend
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'token'],
 };
 
@@ -29,7 +29,7 @@ app.use(express.urlencoded({ extended: false }));
 // Rutas
 app.use('/api/auth', require('./router/auth'));
 app.use('/api/inv', require('./router/wedInvitation'));
-app.use('/api/img', require('./router/images'));
+app.use('/api/guests', require('./router/guests'));
 
 // Escuchar peticiones
 app.listen(process.env.PORT, () => {
