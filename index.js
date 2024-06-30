@@ -22,7 +22,7 @@ const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:3001',
     'https://iattend-frontend.vercel.app',
-    'www.iattend.mx'
+    'wwww.iattend.mx'
 ];
 
 const corsOptions = {
