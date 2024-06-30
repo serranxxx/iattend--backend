@@ -12,8 +12,29 @@ app.use(nocache());
 dbConnection();
 
 // Configuración de CORS para desarrollo
+// const corsOptions = {
+//     origin: 'http://localhost:3000', // Cambia esto por el puerto que estés utilizando para tu aplicación de frontend
+//     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+//     allowedHeaders: ['Content-Type', 'Authorization', 'token'],
+// };
+
+const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'https://iattend-frontend.vercel.app',
+    'www.iattend.mx'
+];
+
 const corsOptions = {
-    origin: 'http://localhost:3000', // Cambia esto por el puerto que estés utilizando para tu aplicación de frontend
+    origin: (origin, callback) => {
+        // Permitir solicitudes sin origen (como móviles o curl)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        } else {
+            return callback(new Error('Not allowed by CORS'));
+        }
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'token'],
 };
