@@ -12,7 +12,7 @@ const router = Router();
 
 router.post('/', validarJWT, postInvitations);
 router.put('/:id', validarJWT, putInvitations);
-router.get('/', validarJWT, getInvitations);
+router.get('/', getInvitations);
 router.get('/dominios', validarJWT, getDominios);
 router.get('/:id', getIvitationbyID);
 router.get('/user/:id', validarJWT, getIvitationsbyUserID);
