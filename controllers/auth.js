@@ -3,6 +3,8 @@ const bcrypt = require('bcryptjs');
 const { generarJWT, getIdUserByToken } = require('../helpers/jwt');
 const user = require('../models/user');
 
+
+
 /** ********************************************
         PUT - Log IN User
 ********************************************** */
