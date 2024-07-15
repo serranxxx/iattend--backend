@@ -7,8 +7,8 @@ const router = express.Router();
 
 router.post('/', validarJWT, createGuest)
 router.get('/', validarJWT, getGuests)
-router.get('/:id', validarJWT, getGuestByInvitationId)
-router.patch('/:id', validarJWT, updateGuestByInvitationId)
+router.get('/:id', getGuestByInvitationId)
+router.patch('/:id', updateGuestByInvitationId)
 router.delete('/:id', validarJWT, deleteGuestByInvitationId)
 
 router.patch('/:id/guests', validarJWT, updateGuestInArray)

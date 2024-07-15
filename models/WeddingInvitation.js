@@ -287,6 +287,9 @@ const WeddInvitation = Schema({
         color: {
             type: String,
         },
+        palette: {
+            type: Object
+        },
         eventName: {
             type: String,
         },
