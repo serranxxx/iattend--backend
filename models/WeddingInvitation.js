@@ -239,7 +239,7 @@ const WeddInvitation = Schema({
             type: Date
         },
         image: {
-            type: Boolean
+            type: String
         },
         featured_prod: {
             type: String,
@@ -248,7 +248,7 @@ const WeddInvitation = Schema({
             type: String,
         },
         color: {
-            type: Boolean,
+            type: String,
         },
         background: {
             type: String
