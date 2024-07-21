@@ -211,6 +211,15 @@ const WeddInvitation = Schema({
     },
 
     cover: {
+        // title: {
+        //     type: Object
+        // },
+        // wallpaper: {
+        //     type: Object
+        // },
+        // date: {
+        //     type: Object
+        // }
         flexDirection: {
             type: String
         },
@@ -252,7 +261,17 @@ const WeddInvitation = Schema({
         },
         background: {
             type: String
+        },
+        auto: {
+            type: Boolean
+        },
+        timerColor: {
+            type: String
+        },
+        timerType: {
+            type: Number
         }
+
     },
 
     gallery: {
