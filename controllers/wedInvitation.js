@@ -97,11 +97,43 @@ const getInvitations = async (req, res = express.response) => {
 /** ********************************************
         GET - All Dominios
 ********************************************** */
+// const getDominios = async (req, res = express.response) => {
+//     try {
+//         const invitations = await WeddingInvitation.find({});
+
+//         // Extraer todos los eventNames
+//         const eventNames = invitations.map(invitation => invitation.generals.eventName);
+
+//         res.json({
+//             ok: true,
+//             msg: 'Get all event names',
+//             eventNames: eventNames
+//         });
+//     } catch (error) {
+//         console.error(error);
+//         res.status(500).json({
+//             ok: false,
+//             msg: 'Error getting event names'
+//         });
+//     }
+// };
+
 const getDominios = async (req, res = express.response) => {
     try {
-        const invitations = await WeddingInvitation.find({});
+        const { label } = req.body;
 
-        // Extraer todos los eventNames
+        // Validar que se haya proporcionado el campo label
+        if (!label) {
+            return res.status(400).json({
+                ok: false,
+                msg: 'Label is required'
+            });
+        }
+
+        // Buscar invitaciones cuyo campo label coincida con el valor proporcionado
+        const invitations = await WeddingInvitation.find({ 'label': label });
+
+        // Extraer todos los eventNames de las invitaciones filtradas
         const eventNames = invitations.map(invitation => invitation.generals.eventName);
 
         res.json({

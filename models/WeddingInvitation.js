@@ -351,6 +351,9 @@ const WeddInvitation = Schema({
         type: Date,
         require: true,
         default: Date.now
+    },
+    label: {
+        type: String
     }
 
 
