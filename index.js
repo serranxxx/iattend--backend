@@ -50,6 +50,7 @@ app.use(express.urlencoded({ extended: false }));
 // Rutas
 app.use('/api/auth', require('./router/auth'));
 app.use('/api/inv', require('./router/wedInvitation'));
+app.use('/api/tags', require('./router/taginvitation'));
 app.use('/api/guests', require('./router/guests'));
 
 // Escuchar peticiones
