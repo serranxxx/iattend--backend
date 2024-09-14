@@ -354,6 +354,9 @@ const WeddInvitation = Schema({
     },
     label: {
         type: String
+    },
+    payment: {
+        type: String
     }
 
 
