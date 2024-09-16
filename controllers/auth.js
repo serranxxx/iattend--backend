@@ -37,13 +37,16 @@ const loginUsuario = async (req, res = response) => {
         const token = await generarJWT(usuario._id, usuario.Name); // Utilizar usuario._id
         console.log(token)
 
+        console.log(usuario)
+
         res.json({
             ok: true,
             msg: 'Valid user',
             data: {
                 uid: usuario._id, // Utilizar usuario._id
                 username: usuario.Name,
-                token: token
+                token: token,
+                role: usuario.Role
             }
         });
     } catch (error) {
