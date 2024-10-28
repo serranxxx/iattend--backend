@@ -46,7 +46,8 @@ const loginUsuario = async (req, res = response) => {
                 uid: usuario._id, // Utilizar usuario._id
                 username: usuario.Name,
                 token: token,
-                role: usuario.Role
+                role: usuario.Role,
+                enterprise: usuario.Enterprise
             }
         });
     } catch (error) {
@@ -161,6 +162,12 @@ const newUser = async (req, res = response) => {
             Invitations,
             Active: true,
             Password: hashedPassword, // Usar la contraseña codificada
+            Enterprise: {
+                name: null,
+                logo: null,
+                discount: null,
+                color: null
+            }
         });
 
         await item.save();
@@ -178,10 +185,67 @@ const newUser = async (req, res = response) => {
 };
 
 
+const editUser = async (req, res = response) => {
+    const { id } = req.params; // Se espera el ID del usuario en los parámetros de la URL
+    const { Name, Email, Password, Role, Invitations, Enterprise } = req.body;
+
+    try {
+        // Verificar si el usuario existe
+        const existingUser = await user.findById(id);
+
+        if (!existingUser) {
+            return res.status(404).json({
+                ok: false,
+                msg: 'User not found',
+            });
+        }
+
+        // Verificar si el nuevo correo electrónico ya está en uso por otro usuario
+        if (Email && Email !== existingUser.Email) {
+            const emailExists = await user.findOne({ Email });
+
+            if (emailExists) {
+                return res.status(400).json({
+                    ok: false,
+                    msg: 'Email already exists',
+                });
+            }
+        }
+
+        // Si se proporciona una nueva contraseña, generamos el hash
+        let hashedPassword = existingUser.Password;
+        if (Password) {
+            const salt = await bcrypt.genSalt(10);
+            hashedPassword = await bcrypt.hash(Password, salt);
+        }
+
+        // Actualizar los campos permitidos
+        existingUser.Name = Name || existingUser.Name;
+        existingUser.Email = Email || existingUser.Email;
+        existingUser.Role = Role || existingUser.Role;
+        existingUser.Invitations = Invitations || existingUser.Invitations;
+        existingUser.Password = hashedPassword;
+        existingUser.Enterprise = Enterprise || existingUser.Enterprise;
+
+        await existingUser.save();
+
+        res.status(200).json({
+            ok: true,
+            msg: 'User updated',
+        });
+    } catch (error) {
+        res.status(500).json({
+            ok: false,
+            msg: error.message || 'Internal Server Error',
+        });
+    }
+};
+
 module.exports = {
     loginUsuario,
     revalidarToken,
     GetAllusers,
     getUserLogged,
-    newUser
+    newUser,
+    editUser
 }

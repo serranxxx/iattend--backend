@@ -43,6 +43,21 @@ const UserSchema = Schema({
         require: true
     },
 
+    Enterprise: {
+        name: {
+            type: String,
+        },
+        logo: {
+            type: String,
+        },
+        discount: {
+            type: Number
+        },
+        color: {
+            type: String
+        }
+    }
+
 
 
 

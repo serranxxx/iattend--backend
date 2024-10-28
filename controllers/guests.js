@@ -1,5 +1,6 @@
 const Guest = require('../models/guests');
 const { generarJWT } = require('../helpers/jwt');
+const User = require('../models/user');
 
 
 
@@ -355,9 +356,17 @@ const shareLogin = async (req, res = response) => {
             return res.status(404).json({ message: 'Guest not found' });
         }
 
+        // Extraer userID de guest
+        const { userID } = guest;
+
+        // Buscar al usuario por ID en la colección User
+        const user = await User.findById(userID);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
         // Buscar el usuario dentro del arreglo de share usando el password
         const usuario = guest.share.find(share => share.password === password);
-
 
         if (!usuario) {
             return res.json({
@@ -376,9 +385,9 @@ const shareLogin = async (req, res = response) => {
             msg: 'Valid user',
             data: {
                 token: token,
-                user: usuario.email
+                user: usuario.email,
+                enterprise: user.Enterprise // Agregar Enterprise del usuario
             }
-
         });
     } catch (error) {
         console.log(error);
