@@ -270,6 +270,12 @@ const WeddInvitation = Schema({
         },
         timerType: {
             type: Number
+        },
+        mapPosition: {
+            type: Object
+        },
+        zoomLevel: {
+            type: Number
         }
 
     },
