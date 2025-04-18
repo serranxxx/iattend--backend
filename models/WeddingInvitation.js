@@ -92,7 +92,21 @@ const WeddInvitation = Schema({
         description: {
             type: String,
             require: true
+        },
+
+        image: {
+            type: Boolean
+        },
+        image_dev: {
+            type: String
+        },
+        image_prod: {
+            type: String
+        },
+        text: {
+            type: Object
         }
+
 
     },
     itinerary: {
