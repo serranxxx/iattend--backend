@@ -30,6 +30,9 @@ const GuestSchema = Schema({
     },
     share: {
         type: Array
+    },
+    tables: {
+        type: Array
     }
 
 
