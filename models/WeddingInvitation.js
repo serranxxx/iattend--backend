@@ -126,7 +126,10 @@ const WeddInvitation = Schema({
         object: {
             type: Array,
             require: true
-        }
+        },
+        title: {
+            type: String,
+        },
 
     },
     dresscode: {
@@ -221,7 +224,10 @@ const WeddInvitation = Schema({
         id: {
             type: Number
         },
-        notices: Array
+        notices: Array,
+        title: {
+            type: String,
+        },
     },
 
     cover: {
@@ -319,7 +325,10 @@ const WeddInvitation = Schema({
         },
         available: {
             type: Number
-        }
+        },
+        title: {
+            type: String,
+        },
     },
     generals: {
 
