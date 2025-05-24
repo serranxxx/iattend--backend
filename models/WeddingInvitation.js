@@ -18,6 +18,9 @@ const WeddInvitation = Schema({
             type: Boolean,
             require: true
         },
+        invertedColors: {
+            type: Boolean
+        },
         background: {
             type: Boolean
         },
@@ -43,6 +46,9 @@ const WeddInvitation = Schema({
             require: true
         },
         background: {
+            type: Boolean
+        },
+        invertedColors: {
             type: Boolean
         },
         separator: {
@@ -79,6 +85,9 @@ const WeddInvitation = Schema({
         active: {
             type: Boolean,
             require: true
+        },
+        invertedColors: {
+            type: Boolean
         },
         id: {
             type: Number
@@ -117,6 +126,9 @@ const WeddInvitation = Schema({
         background: {
             type: Boolean
         },
+        invertedColors: {
+            type: Boolean
+        },
         separator: {
             type: Boolean
         },
@@ -138,6 +150,9 @@ const WeddInvitation = Schema({
             require: true
         },
         background: {
+            type: Boolean
+        },
+        invertedColors: {
             type: Boolean
         },
         id: {
@@ -194,6 +209,9 @@ const WeddInvitation = Schema({
         background: {
             type: Boolean
         },
+        invertedColors: {
+            type: Boolean
+        },
         separator: {
             type: Boolean
         },
@@ -216,6 +234,9 @@ const WeddInvitation = Schema({
             require: true
         },
         background: {
+            type: Boolean
+        },
+        invertedColors: {
             type: Boolean
         },
         separator: {
@@ -311,7 +332,9 @@ const WeddInvitation = Schema({
         background: {
             type: Boolean
         },
-
+        invertedColors: {
+            type: Boolean
+        },
         separator: {
             type: Boolean
         },
