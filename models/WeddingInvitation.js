@@ -267,6 +267,9 @@ const WeddInvitation = Schema({
         date: {
             type: Date
         },
+        isDate: {
+            type: Boolean
+        },
         image: {
             type: String
         },
