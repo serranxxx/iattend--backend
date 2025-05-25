@@ -378,6 +378,9 @@ const WeddInvitation = Schema({
         },
         positions: {
             type: Array
+        },
+        texture: {
+            type: Number
         }
     },
     active: {
