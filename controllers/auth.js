@@ -143,6 +143,7 @@ const newUser = async (req, res = response) => {
 
     try {
         // Verificar si ya existe un usuario con el mismo correo electrónico
+        // TEST
         Email = Email.toLowerCase();
         const existingUser = await user.findOne({ Email });
 
