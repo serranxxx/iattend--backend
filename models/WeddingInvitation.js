@@ -415,6 +415,9 @@ const WeddInvitation = Schema({
     },
     payment: {
         type: String
+    },
+    started: {
+        type: Boolean
     }
 
 

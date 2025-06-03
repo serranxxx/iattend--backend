@@ -52,6 +52,7 @@ app.use('/api/auth', require('./router/auth'));
 app.use('/api/inv', require('./router/wedInvitation'));
 app.use('/api/tags', require('./router/taginvitation'));
 app.use('/api/guests', require('./router/guests'));
+app.use('/api/ai', require('./router/iattendai'));
 
 // Escuchar peticiones
 app.listen(process.env.PORT, () => {

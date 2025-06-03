@@ -9,9 +9,10 @@ const user = require('../models/user');
         PUT - Log IN User
 ********************************************** */
 const loginUsuario = async (req, res = response) => {
-    const { Email, Password } = req.body;
+    let { Email, Password } = req.body;
 
     try {
+        Email = Email.toLowerCase();
         const usuario = await user.findOne({ Email });
 
         if (!usuario) {
@@ -138,10 +139,11 @@ const getUserLogged = async (req, res) => {
         POST - Create user
 ********************************************** */
 const newUser = async (req, res = response) => {
-    const { Name, Email, Password, Role, Invitations } = req.body;
+    let { Name, Email, Password, Role, Invitations } = req.body;
 
     try {
         // Verificar si ya existe un usuario con el mismo correo electrónico
+        Email = Email.toLowerCase();
         const existingUser = await user.findOne({ Email });
 
         if (existingUser) {
