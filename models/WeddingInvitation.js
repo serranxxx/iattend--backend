@@ -252,15 +252,6 @@ const WeddInvitation = Schema({
     },
 
     cover: {
-        // title: {
-        //     type: Object
-        // },
-        // wallpaper: {
-        //     type: Object
-        // },
-        // date: {
-        //     type: Object
-        // }
         flexDirection: {
             type: String
         },
@@ -304,7 +295,7 @@ const WeddInvitation = Schema({
             type: String,
         },
         background: {
-            type: String
+            type: Boolean
         },
         auto: {
             type: Boolean
