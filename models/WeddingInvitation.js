@@ -228,6 +228,33 @@ const WeddInvitation = Schema({
             type: Array
         }
     },
+    destinations: {
+        active: {
+            type: Boolean,
+            require: true
+        },
+        background: {
+            type: Boolean
+        },
+        invertedColors: {
+            type: Boolean
+        },
+        separator: {
+            type: Boolean
+        },
+        id: {
+            type: Number
+        },
+        title: {
+            type: String,
+        },
+        description: {
+            type: String
+        },
+        cards: {
+            type: Array
+        }
+    },
     notices: {
         active: {
             type: Boolean,
