@@ -27,7 +27,7 @@ El JSON debe tener los siguientes campos:
         "secondary": "Color que complementa al primario. Si no se menciona un segundo color, usa el color base en un tono más oscuro. Si se menciona, asegúrate de que tenga alto contraste con el color base. Formato hexadecimal.",
           "accent": "Color del texto principal. Debe tener alto contraste y buena legibilidad sobre el color base (no sobre el color secundario). En hexadecimal.",
             "buttons": "Color llamativo para botones o llamados a la acción. Debe armonizar con los demás colores. En hexadecimal.",
-              "contrast": true // Booleano: true si el secondary tiene alto contraste con el primary, false si es solo un tono más oscuro.
+              "contrast": Booleano: si el color accent para el texto es legible y tiene un alto contraste con el color secondary es false, si no es true.
     },
     "greeting": {
       "title": "Título corto que da la bienvenida a la invitación.",
@@ -57,7 +57,7 @@ El JSON debe tener los siguientes campos:
             "notices": [
               "Avisos o recomendaciones adicionales. Ej: llegar a tiempo, evento sin niños, transporte disponible, etc. Agrega al menos tres."
             ],
-              "texture": "Basado en las palabras clave, elige una de estas opciones: Hoja de papel, Lienzo, Papel viejo, Cartón.",
+              "texture": "Basado en las palabras clave, elige una de estas opciones: Moderno, Liso, Hoja de papel, Lienzo, Papel viejo, Cartón.",
                 "separator": "Basado en las palabras clave, elige una de estas opciones: Formal, Floral, Detallado, Simple, Romántico, Sobrio.",
                   "title_style": "Basado en la descripción y palabras clave, elige una de estas opciones: Cursiva, Negritas, Sencilla.",
                     "destinations": "Si se menciona que el evento es en un destino distinto o turístico, incluye una frase sobre hospedaje o contacto para más información."
