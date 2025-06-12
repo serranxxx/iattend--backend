@@ -149,6 +149,36 @@ const updateGuestByInvitationId = async (req, res) => {
     }
 };
 
+const confirmGuests = async (req, res) => {
+    const invitationID = req.params.id;
+    const newGuest = req.body.guest;
+
+    try {
+        const guest = await Guest.findOneAndUpdate(
+            { invitationID },
+            { $push: { guests: newGuest } },
+            { new: true, runValidators: true }
+        );
+
+        if (!guest) {
+            return res.status(404).json({ message: 'Guest not found' });
+        }
+
+        res.status(200).json({
+            ok: true,
+            msg: 'Guest updated successfully',
+            guest
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            ok: false,
+            msg: 'Error updating guest',
+            error: error.message
+        });
+    }
+};
+
 // Eliminar un invitado por invitationID
 const deleteGuestByInvitationId = async (req, res) => {
     const { invitationID } = req.params;
@@ -417,4 +447,5 @@ module.exports = {
     addShareItem,
     deleteShareItemById,
     shareLogin,
+    confirmGuests
 };
