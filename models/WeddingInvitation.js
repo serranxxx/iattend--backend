@@ -324,6 +324,9 @@ const WeddInvitation = Schema({
         background: {
             type: Boolean
         },
+        blur: {
+            type: Boolean
+        },
         auto: {
             type: Boolean
         },
