@@ -27,7 +27,7 @@ El JSON debe tener los siguientes campos:
         "secondary": "Color que complementa al primario. Si no se menciona un segundo color, usa el color base en un tono más oscuro. Si se menciona, asegúrate de que tenga alto contraste con el color base. Formato hexadecimal.",
           "accent": "Color del texto principal. Debe tener alto contraste y buena legibilidad sobre el color base. Si el color base es claro debe de ser oscuro y viceversa. En hexadecimal.",
             "buttons": "Color llamativo para botones o llamados a la acción. Debe armonizar con los demás colores. En hexadecimal.",
-              "contrast": Booleano: si el color accent para el texto es legible y tiene un alto contraste con el color secondary es false, si no es true.
+              "contrast": Booleano: si el color secondary es un color oscuro y el color accent tambien es un color oscuro el resultado es true, sino es false.
     },
     "greeting": {
       "title": "Título corto que da la bienvenida a la invitación.",
