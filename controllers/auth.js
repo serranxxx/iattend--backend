@@ -166,10 +166,15 @@ const newUser = async (req, res = response) => {
             Active: true,
             Password: hashedPassword, // Usar la contraseña codificada
             Enterprise: {
+                active: false,
                 name: null,
                 logo: null,
                 discount: null,
-                color: null
+                color: null,
+                instagram: null,
+                email: null,
+                whatsapp: null,
+                webpage: null,
             }
         });
 

@@ -44,6 +44,9 @@ const UserSchema = Schema({
     },
 
     Enterprise: {
+        active: {
+            type: Boolean
+        },
         name: {
             type: String,
         },
@@ -55,7 +58,20 @@ const UserSchema = Schema({
         },
         color: {
             type: String
+        },
+        instagram: {
+            type: String
+        },
+        email: {
+            type: String
+        },
+        whatsapp: {
+            type: String
+        },
+        webpage: {
+            type: String
         }
+        
     }
 
 
