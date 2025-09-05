@@ -86,6 +86,7 @@ const getGuests = async (req, res) => {
         const guests = await Guest.find();
         res.status(200).json({
             ok: true,
+            msg: 'Get all guests',
             guests
         });
     } catch (error) {
