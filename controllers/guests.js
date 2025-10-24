@@ -207,6 +207,7 @@ const deleteGuestByInvitationId = async (req, res) => {
 const updateGuestInArray = async (req, res) => {
     const invitationID = req.params.id;
     const { id, guestUpdates } = req.body;
+    console.log(id)
 
     try {
         const guest = await Guest.findOne({ invitationID });
