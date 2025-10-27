@@ -6,8 +6,7 @@ const invitation = require('./WeddingInvitation')
 const GuestSchema = Schema({
 
     userID: {
-        type: Schema.Types.ObjectId,
-        ref: user,
+        type: String,
         required: true
     },
     invitationID: {

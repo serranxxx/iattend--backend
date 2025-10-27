@@ -219,6 +219,8 @@ const postInvitations = async (req, res = response) => {
     try {
         // Crear y guardar la nueva invitación
         const item = new WeddingInvitation(req.body);
+
+        console.log(item)
         await item.save();
 
         // // Extraer el userID del cuerpo de la solicitud

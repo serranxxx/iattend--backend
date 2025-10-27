@@ -10,8 +10,7 @@ const user = require('./user');
 const WeddInvitation = Schema({
 
     userID: {
-        type: Schema.Types.ObjectId || String,
-        ref: user
+        type:String,
     },
     greeting: {
         active: {
