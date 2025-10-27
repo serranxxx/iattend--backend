@@ -221,16 +221,17 @@ const postInvitations = async (req, res = response) => {
         const item = new WeddingInvitation(req.body);
         await item.save();
 
-        // Extraer el userID del cuerpo de la solicitud
-        const userID = req.body.userID;
+        // // Extraer el userID del cuerpo de la solicitud
+        // const userID = req.body.userID;
 
-        // Agregar el ID de la nueva invitación al usuario
-        await addInvitationToUser(userID, item._id);
+        // // Agregar el ID de la nueva invitación al usuario
+        // await addInvitationToUser(userID, item._id);
 
         res.status(201).json({
             ok: true,
             msg: 'New invitation added',
-            invitationID: item._id
+            invitationID: item._id,
+            invitation: item
         });
     } catch (error) {
         console.error('Error adding new invitation:', error.message);
