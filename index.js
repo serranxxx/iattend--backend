@@ -56,6 +56,7 @@ app.use('/api/tags', require('./router/taginvitation'));
 app.use('/api/guests', require('./router/guests'));
 app.use('/api/ai', require('./router/iattendai'));
 app.use('/api/mail', require('./router/mailer'));
+app.use('/api/whats', require('./router/whatsapp'));
 
 // Escuchar peticiones
 app.listen(process.env.PORT, () => {
