@@ -8,7 +8,7 @@ const PRODUCTS = {
   price_1Sx8PvAAdNlITNVbchl6tJBW: { type: "credits", value: 50 },
   price_1Sx8QpAAdNlITNVbIod9MW44: { type: "credits", value: 100 },
   price_1Sx8RWAAdNlITNVbj7c85GlG: { type: "credits", value: 200 },
-  // price_1T1H17AAdNlITNVbrTS94Xdr: { type: "credits", value: 1 },
+  price_1T1H17AAdNlITNVbrTS94Xdr: { type: "credits", value: 1 },
 
   price_1SkRvtAAdNlITNVbj8BA6F2Q: { type: "plan", value: "paperless" },
   price_1SkRwZAAdNlITNVbEsPlYN0F: { type: "plan", value: "lite" },
