@@ -5,7 +5,7 @@ const { dbConnection } = require('./database/config');
 const nocache = require('nocache');
 
 const Stripe = require("stripe");
-const { handleCredits, updateInvitationCredits } = require('./controllers/supabase');
+const { processingPayment } = require('./controllers/supabase');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Crear el servidor de express
@@ -73,17 +73,8 @@ app.post(
 
         if (event.type === "checkout.session.completed") {
             const session = event.data.object;
-            const invitationId = session.metadata.invitationId;
-            const priceId = session.metadata.priceId;
-
-            // console.log('session: ', session)
-
-            // console.log("🎉 Pago confirmado:", session.id);
-            // console.log("🧾 Invitation ID:", invitationId);
-            // console.log("💰 Product ID:", priceId);
-
-            const credits = handleCredits(priceId)
-            await updateInvitationCredits(invitationId, credits)
+            
+            await processingPayment(session)
         }
 
         res.json({ received: true });
