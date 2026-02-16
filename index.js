@@ -4,6 +4,10 @@ const cors = require('cors');
 const { dbConnection } = require('./database/config');
 const nocache = require('nocache');
 
+const Stripe = require("stripe");
+const { handleCredits, updateInvitationCredits } = require('./controllers/supabase');
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+
 // Crear el servidor de express
 const app = express();
 app.use(nocache());
@@ -45,6 +49,48 @@ app.use(cors(corsOptions));
 app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
 app.use('/drafts', express.static('drafts'));
+
+app.post(
+    "/api/payment/webhook",
+    express.raw({ type: "application/json" }),
+    async (req, res) => {
+        const sig = req.headers["stripe-signature"];
+
+        let event;
+
+        try {
+            event = stripe.webhooks.constructEvent(
+                req.body,
+                sig,
+                process.env.STRIPE_WEBHOOK_SECRET
+            );
+        } catch (err) {
+            console.log("❌ Error webhook:", err.message);
+            return res.status(400).send(`Webhook Error: ${err.message}`);
+        }
+
+        // console.log("✅ Evento recibido:", event.type);
+
+        if (event.type === "checkout.session.completed") {
+            const session = event.data.object;
+            const invitationId = session.metadata.invitationId;
+            const priceId = session.metadata.priceId;
+
+            // console.log('session: ', session)
+
+            // console.log("🎉 Pago confirmado:", session.id);
+            // console.log("🧾 Invitation ID:", invitationId);
+            // console.log("💰 Product ID:", priceId);
+
+            const credits = handleCredits(priceId)
+            await updateInvitationCredits(invitationId, credits)
+        }
+
+        res.json({ received: true });
+    }
+);
+
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -57,6 +103,9 @@ app.use('/api/guests', require('./router/guests'));
 app.use('/api/ai', require('./router/iattendai'));
 app.use('/api/mail', require('./router/mailer'));
 app.use('/api/whats', require('./router/whatsapp'));
+
+app.use("/api/payment", require("./controllers/payment"));
+
 
 // Escuchar peticiones
 app.listen(process.env.PORT, () => {
