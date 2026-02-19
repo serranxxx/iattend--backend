@@ -2,6 +2,7 @@ const { response } = require('express');
 const bcrypt = require('bcryptjs');
 const { generarJWT, getIdUserByToken } = require('../helpers/jwt');
 const user = require('../models/user');
+const supabase = require('../config/supabase');
 
 
 
@@ -249,11 +250,92 @@ const editUser = async (req, res = response) => {
     }
 };
 
+const createUser = async (req, res = response) => {
+    let { Name, Email, Password } = req.body;
+
+    try {
+
+        Email = Email.toLowerCase();
+
+        const { data: existingUsers, error: fetchError } =
+            await supabase.auth.admin.listUsers();
+
+        if (fetchError) {
+            return res.status(500).json({
+                ok: false,
+                msg: fetchError.message
+            });
+        }
+
+        const alreadyExists = existingUsers.users.find(
+            user => user.email === Email
+        );
+
+        if (alreadyExists) {
+            return res.status(400).json({
+                ok: false,
+                msg: 'Email already exists'
+            });
+        }
+
+        // 2️⃣ Crear usuario en Supabase Auth
+        const { data, error } = await supabase.auth.admin.createUser({
+            email: Email,
+            password: Password,
+            email_confirm: true,
+        });
+
+
+        if (error) {
+            return res.status(400).json({
+                ok: false,
+                msg: error.message
+            });
+        }
+
+        // 3️⃣ Crear registro en tabla profiles
+        const { error: profileError } = await supabase
+            .from('profiles')
+            .insert({
+                user_id: data.user.id,
+                full_name: Name,
+                user_email: Email,
+            });
+
+        if (profileError) {
+            return res.status(400).json({
+                ok: false,
+                msg: profileError.message
+            });
+        }
+
+        res.status(200).json({
+            ok: true,
+            msg: 'User uploaded',
+            data: {
+                email: Email,
+                pass: Password,
+                id: data.user.id
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            ok: false,
+            msg: error.message || 'Internal Server Error'
+        });
+    }
+};
+
+
+
+
 module.exports = {
     loginUsuario,
     revalidarToken,
     GetAllusers,
     getUserLogged,
     newUser,
-    editUser
+    editUser,
+    createUser
 }
