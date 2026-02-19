@@ -94,7 +94,7 @@ app.use('/api/guests', require('./router/guests'));
 app.use('/api/ai', require('./router/iattendai'));
 app.use('/api/mail', require('./router/mailer'));
 app.use('/api/whats', require('./router/whatsapp'));
-
+app.use('/api/invitation', require('./router/invitation'));
 app.use("/api/payment", require("./controllers/payment"));
 
 
