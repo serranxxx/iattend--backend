@@ -1,9 +1,18 @@
 const express = require('express');
 const axios = require('axios');
+const supabase = require('../config/supabase');
+
 
 const sendWhatsappTemplate = async (req, res = express.response) => {
   try {
-    const payload = req.body; // viene completo desde el frontend
+
+    const {
+      invitationId,
+      guestId,
+      guestName,
+      guestPhone,
+      ...payload
+    } = req.body;
 
     // validación mínima para evitar mandar basura
     if (!payload?.to || !payload?.template?.name || !payload?.template?.language?.code) {
@@ -13,6 +22,15 @@ const sendWhatsappTemplate = async (req, res = express.response) => {
         data: null
       });
     }
+
+    if (!invitationId || !guestId || !guestPhone) {
+      return res.status(400).json({
+        ok: false,
+        msg: 'Missing required fields: invitationId, guestId, guestPhone',
+        data: null
+      });
+    }
+
 
     const phoneNumberId = process.env.WA_PHONE_NUMBER_ID;
     const token = process.env.WA_ACCESS_TOKEN;
@@ -26,10 +44,38 @@ const sendWhatsappTemplate = async (req, res = express.response) => {
       }
     });
 
+    const metaMessageId = data?.messages?.[0]?.id || null;
+
+    const { data: dispatch, error: dispatchError } = await supabase
+      .from('invitation_message_dispatches')
+      .insert({
+        invitation_id: invitationId,
+        guest_id: guestId,
+        guest_name: guestName || null,
+        guest_phone: guestPhone,
+        meta_message_id: metaMessageId,
+        status: 'processing',
+        raw_send_response: data
+      })
+      .select()
+      .single();
+
+    if (dispatchError) {
+      console.error('Error saving dispatch in Supabase:', dispatchError);
+
+      return res.status(500).json({
+        ok: false,
+        msg: 'WhatsApp message sent but failed to save dispatch in Supabase',
+        error: dispatchError.message,
+        data
+      });
+    }
+
     return res.status(200).json({
       ok: true,
       msg: 'WhatsApp template sent',
-      data
+      data,
+      dispatch
     });
 
   } catch (error) {
