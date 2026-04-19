@@ -24,62 +24,34 @@ const PRODUCTS = {
  */
 async function processingPayment(session) {
 
-  console.log("🔔 [webhook] processingPayment iniciado");
-  console.log("🔔 [webhook] session.metadata:", JSON.stringify(session.metadata));
-
-  if (!session?.metadata) {
-    console.log("❌ [webhook] Sin metadata, abortando");
-    return;
-  }
+  if (!session?.metadata) return;
 
   const { invitationId, userId, priceId } = session.metadata;
-  console.log(`🔔 [webhook] invitationId=${invitationId} | userId=${userId} | priceId=${priceId}`);
-
-  if (!priceId) {
-    console.log("❌ [webhook] Sin priceId, abortando");
-    return;
-  }
+  if (!priceId) return;
 
   const product = PRODUCTS[priceId];
-  console.log("🔔 [webhook] product:", product);
+  if (!product) return;
 
-  if (!product) {
-    console.log("❌ [webhook] priceId no encontrado en PRODUCTS, abortando");
-    return;
-  }
-
-  // Compra de nueva invitación (sin invitationId existente)
   if (!invitationId && userId) {
-    console.log("🔔 [webhook] Ruta: nueva invitación con userId");
     if (product.type === "plan") {
       await createInvitationWithPlan(userId, product.value, session.metadata);
-    } else {
-      console.log(`❌ [webhook] product.type=${product.type}, se esperaba 'plan'`);
     }
     return;
   }
 
-  if (!invitationId) {
-    console.log("❌ [webhook] Sin invitationId ni userId, abortando");
-    return;
-  }
+  if (!invitationId) return;
 
-  console.log(`🔔 [webhook] Ruta: invitación existente id=${invitationId}`);
   switch (product.type) {
     case "credits":
       await incrementCredits(invitationId, product.value);
       break;
-
     case "side":
       await addSideEvent(invitationId);
       break;
-
     case "plan":
       await activatePlan(invitationId, product.value);
       break;
-
     default:
-      console.log(`❌ [webhook] product.type desconocido: ${product.type}`);
       break;
   }
 }
@@ -88,7 +60,6 @@ async function processingPayment(session) {
  * Incremento atómico de créditos
  */
 async function incrementCredits(invitationId, amount) {
-  console.log('credtis: ', amount)
   const { error } = await supabase.rpc("increment_invitation_credits", {
     invitation_id: invitationId,
     amount
@@ -103,7 +74,6 @@ async function incrementCredits(invitationId, amount) {
  * Inserta un side event por defecto
  */
 async function addSideEvent(invitationId) {
-  console.log('side_event to: ', invitationId)
   const defaultBody = {
     address: {
       street: null,
@@ -280,14 +250,10 @@ async function createInvitationWithPlan(userId, planName, metadata = {}) {
     },
   };
 
-  console.log("🔔 [webhook] createInvitationWithPlan payload:", JSON.stringify(payload));
-
   const { error } = await supabase.from("invitations").insert(payload);
 
   if (error) {
-    console.error("❌ [webhook] Error creando invitación:", JSON.stringify(error));
-  } else {
-    console.log("✅ [webhook] Invitación creada correctamente");
+    console.error("Error creando invitación con plan:", error);
   }
 }
 
