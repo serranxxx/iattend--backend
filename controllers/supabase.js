@@ -180,7 +180,104 @@ async function createInvitationWithPlan(userId, planName, metadata = {}) {
     tickets: 300,
     owners: [],
     url_image: null,
-    data: null,
+    data: {
+      cover: {
+        date: { type: null, color: "#FFFFFF", value: "2026-05-20T00:00:00.000Z", active: true },
+        image: { dev: null, blur: false, prod: "https://jblcqcxckefmydvtrxbi.supabase.co/storage/v1/object/public/user_images/14376896-4930-4429-b427-96e047695396/1769460961115-couple.jpeg", zoom: 1, position: { x: 0, y: 0 }, background: true },
+        title: { text: { size: 54, color: "#ffffff", value: "Andrés & Julieta", weight: 1000, opacity: 0.95, typeFace: "WindSong" }, position: { align_x: "center", align_y: "flex-end", column_reverse: "column" } },
+      },
+      gifts: {
+        cards: [
+          { url: "https://www.amazon.com.mx/", bank: null, kind: "store", name: null, brand: "Palacio de hierro", number: null },
+          { url: "https://www.amazon.com.mx/", bank: null, kind: "store", name: null, brand: "Sears", number: null },
+          { url: null, bank: "BBVA", kind: "bank", name: "Luis Serrano", brand: null, number: "4242424242424242" },
+        ],
+        title: "MESA DE REGALOS", active: true, inverted: true, separator: false, background: false,
+        description: "¡Tu presencia es el mejor regalo, pero tus buenos deseos se hacen aún más especiales con un toque personal!",
+        dynamic_separator: { type: "single", image: { zoom: 1, value: null, width: 100, height: 300, position: { x: 0, y: 0 } }, active: false, single: { color: "#252525", value: 5 } },
+        dynamic_background: { color: "#939faf", shape: "square", width: 90, active: false, shadow: true, texture: null, border_radius: 0 },
+      },
+      quote: {
+        text: { font: { size: 18, color: "#ffffff", value: "Nuestro amor es el comienzo de un 'para siempre' que no tiene final.", weight: 500, opacity: 0.87, typeFace: "Noto Sans" }, align: "flex-start", width: 90, shadow: false, justify: "center" },
+        image: { dev: null, prod: "https://firebasestorage.googleapis.com/v0/b/iattend-df79a.appspot.com/o/invitations%2F66a31dc63d724e3f40549b95%2Fquote%2FLyPl6vhxCk?alt=media&token=17b6cda0-8146-4100-8f19-2f86f306883a", active: true },
+        active: true, inverted: false, separator: false, background: false,
+        dynamic_separator: { type: "single", image: { zoom: 1, value: null, width: 100, height: 300, position: { x: 0, y: 0 } }, active: false, single: { color: "#252525", value: 5 } },
+        dynamic_background: { color: "#939faf", shape: "square", width: 90, active: false, shadow: true, texture: null, border_radius: 0 },
+      },
+      people: {
+        title: "Nuestros padres", active: true, inverted: true, separator: false, background: false,
+        personas: [
+          { title: "Padre del novio", description: "Manuel Velázquez " },
+          { title: "Madre del novio", description: "María Lourdes " },
+          { title: "Padre de la novia", description: "Edgar González " },
+          { title: "Madre de la novia", description: "Ericka Gutiérrez " },
+        ],
+        dynamic_separator: { type: "single", image: { zoom: 1, value: null, width: 100, height: 300, position: { x: 0, y: 0 } }, active: false, single: { color: "#252525", value: 5 } },
+        dynamic_background: { color: "#939faf", shape: "square", width: 90, active: true, shadow: true, texture: null, border_radius: 0 },
+      },
+      gallery: {
+        dev: null,
+        prod: [
+          "https://firebasestorage.googleapis.com/v0/b/iattend-df79a.appspot.com/o/invitations%2F66a31dc63d724e3f40549b95%2Fgallery%2FeFLO43QYMc?alt=media&token=b7898198-6597-4d73-9f02-099a3bd29144",
+          "https://firebasestorage.googleapis.com/v0/b/iattend-df79a.appspot.com/o/invitations%2F66a31dc63d724e3f40549b95%2Fgallery%2F1IFd1jvgfo?alt=media&token=71bf153e-7a96-43d3-afa0-f9698f3b7a88",
+          "https://firebasestorage.googleapis.com/v0/b/iattend-df79a.appspot.com/o/invitations%2F66a31dc63d724e3f40549b95%2Fgallery%2FToBhZMReXW?alt=media&token=61079e78-25a0-4cf8-92de-1fb1e84ff945",
+        ],
+        title: "GALERÍA", active: true, inverted: false, separator: false, background: false,
+        dynamic_separator: { type: "single", image: { zoom: 1, value: null, width: 100, height: 300, position: { x: 0, y: 0 } }, active: false, single: { color: "#252525", value: 5 } },
+        dynamic_background: { color: "#939faf", shape: "square", width: 90, active: false, shadow: true, texture: null, border_radius: 0 },
+      },
+      notices: {
+        title: "AVISOS", active: false, notices: [], inverted: false, separator: false, background: false,
+        dynamic_separator: { type: "single", image: { zoom: 1, value: null, width: 100, height: 300, position: { x: 0, y: 0 } }, active: false, single: { color: "#252525", value: 5 } },
+        dynamic_background: { color: "#939faf", shape: "square", width: 90, active: false, shadow: true, texture: null, border_radius: 0 },
+      },
+      generals: {
+        event: { name: "test", label: "wedding" },
+        fonts: {
+          body: { size: 0, color: "#000000", value: "Noto Sans", weight: 0, opacity: 1, typeFace: "Noto Sans" },
+          titles: { size: 0, color: "#000000", value: "Noto Sans", weight: 0, opacity: 1, typeFace: "Noto Sans" },
+        },
+        colors: { accent: "#252525", actions: "#87bee9", primary: "#ffffff", secondary: "#939faf" },
+        texture: 9, positions: [1, 2, 3, 4, 5, 6, 7, 8, 9], separator: 5,
+      },
+      greeting: {
+        title: "¡Nos casamos!", active: true, inverted: false, separator: true, background: false,
+        description: "Con mucha ilusión y amor, les invitamos a compartir con nosotros uno de los días más importantes de nuestras vidas.",
+        dynamic_separator: { type: "single", image: { zoom: 1, value: null, width: 100, height: 300, position: { x: 0, y: 0 } }, active: false, single: { color: "#252525", value: 5 } },
+        dynamic_background: { color: "#939faf", shape: "square", width: 90, active: false, shadow: true, texture: null, border_radius: 0 },
+      },
+      dresscode: {
+        dev: null,
+        prod: [
+          "https://firebasestorage.googleapis.com/v0/b/iattend-df79a.appspot.com/o/invitations%2F66a31dc63d724e3f40549b95%2Fdresscode%2FeaEBaR4QgL?alt=media&token=eba80adb-0251-45b9-b225-3e96d965d49b",
+          "https://firebasestorage.googleapis.com/v0/b/iattend-df79a.appspot.com/o/invitations%2F66a31dc63d724e3f40549b95%2Fdresscode%2FdSRYh8q9dX?alt=media&token=2ebda00a-25a8-4d35-aa78-59588fe8f5ff",
+        ],
+        links: [], title: "Dress code", active: true, colors: ["#e9e9e9", "#79abd1"], inverted: true, separator: false, background: false,
+        description: "Sigue el código de vestimenta formal con tu propio toque. Encuentra opciones que se ajusten a tu estilo en nuestra galería de Pinterest.",
+        links_active: false, images_active: true,
+        dynamic_separator: { type: "single", image: { zoom: 1, value: null, width: 100, height: 300, position: { x: 0, y: 0 } }, active: false, single: { color: "#252525", value: 5 } },
+        dynamic_background: { color: "#939faf", shape: "square", width: 90, active: true, shadow: true, texture: null, border_radius: 0 },
+      },
+      itinerary: {
+        type: "cards", title: "ITINERARIO", active: true, inverted: true, separator: false, background: false,
+        object: [
+          { id: null, icon: 55, name: "Ceremonia", time: "5:00 pm", image: null, music: null, subtext: "San Antonio de Padua" },
+          { id: null, icon: 16, name: "Recepción", time: "8:00 pm", image: null, music: null, subtext: "Los Aduanales" },
+        ],
+        dynamic_separator: { type: "single", image: { zoom: 1, value: null, width: 100, height: 300, position: { x: 0, y: 0 } }, active: false, single: { color: "#252525", value: 5 } },
+        dynamic_background: { color: "#939faf", shape: "square", width: 90, active: false, shadow: true, texture: null, border_radius: 0 },
+      },
+      destinations: {
+        cards: [
+          { url: "sadcdacc", name: "Sheraton", type: "hotel", image: "https://firebasestorage.googleapis.com/v0/b/iattend-df79a.appspot.com/o/invitations%2F66a31dc63d724e3f40549b95%2Fdestinations%2FcRvWs5A1fe?alt=media&token=92798d5a-e561-46c4-9607-3029db188f5f", description: null },
+          { url: "sodded", name: "Hotel One", type: "hotel", image: "https://firebasestorage.googleapis.com/v0/b/iattend-df79a.appspot.com/o/invitations%2F66a31dc63d724e3f40549b95%2Fdestinations%2FzrYoKKvOVx?alt=media&token=4dc56c12-b329-4c97-ab1a-0bdc4f8ef5b4", description: null },
+        ],
+        title: "DESTINOS", active: true, inverted: false, separator: false, background: false,
+        description: "Sabemos que este viaje es especial y queremos que lo disfrutes al máximo. Aquí encontrarás una selección de lugares para hospedarte",
+        dynamic_separator: { type: "single", image: { zoom: 1, value: null, width: 100, height: 300, position: { x: 0, y: 0 } }, active: false, single: { color: "#252525", value: 5 } },
+        dynamic_background: { color: "#939faf", shape: "square", width: 90, active: false, shadow: true, texture: null, border_radius: 0 },
+      },
+    },
   };
 
   console.log("🔔 [webhook] createInvitationWithPlan payload:", JSON.stringify(payload));
