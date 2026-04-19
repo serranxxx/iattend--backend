@@ -15,12 +15,6 @@ app.use(nocache());
 // Base de datos
 dbConnection();
 
-// Configuración de CORS para desarrollo
-// const corsOptions = {
-//     origin: 'http://localhost:3000', // Cambia esto por el puerto que estés utilizando para tu aplicación de frontend
-//     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-//     allowedHeaders: ['Content-Type', 'Authorization', 'token'],
-// };
 
 const allowedOrigins = [
     'http://localhost:3000',
@@ -69,11 +63,11 @@ app.post(
             return res.status(400).send(`Webhook Error: ${err.message}`);
         }
 
-        // console.log("✅ Evento recibido:", event.type);
+        console.log("✅ [webhook] Evento recibido:", event.type);
 
         if (event.type === "checkout.session.completed") {
             const session = event.data.object;
-            
+            console.log("✅ [webhook] checkout.session.completed - session id:", session.id);
             await processingPayment(session)
         }
 

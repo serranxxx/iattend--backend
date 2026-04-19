@@ -13,6 +13,7 @@ const PRODUCTS = {
   price_1SkRvtAAdNlITNVbj8BA6F2Q: { type: "plan", value: "paperless" },
   price_1SkRwZAAdNlITNVbEsPlYN0F: { type: "plan", value: "lite" },
   price_1SkRxCAAdNlITNVbB0AB16LN: { type: "plan", value: "pro" },
+  price_1TO1kjAAdNlITNVbmfuaY1nm: { type: "plan", value: "pro" },
 
   price_1T1VeXAAdNlITNVbXeWLTh3Y: { type: "side", value: "side_event" },
   price_1T1WY5AAdNlITNVbGrRJx77i: {type: "side", value: "side_event"}
@@ -23,15 +24,47 @@ const PRODUCTS = {
  */
 async function processingPayment(session) {
 
-  console.log('session: ', session.object)
-  if (!session?.metadata) return;
+  console.log("🔔 [webhook] processingPayment iniciado");
+  console.log("🔔 [webhook] session.metadata:", JSON.stringify(session.metadata));
 
-  const { invitationId, priceId } = session.metadata;
-  if (!invitationId || !priceId) return;
+  if (!session?.metadata) {
+    console.log("❌ [webhook] Sin metadata, abortando");
+    return;
+  }
+
+  const { invitationId, userId, priceId } = session.metadata;
+  console.log(`🔔 [webhook] invitationId=${invitationId} | userId=${userId} | priceId=${priceId}`);
+
+  if (!priceId) {
+    console.log("❌ [webhook] Sin priceId, abortando");
+    return;
+  }
 
   const product = PRODUCTS[priceId];
-  if (!product) return;
+  console.log("🔔 [webhook] product:", product);
 
+  if (!product) {
+    console.log("❌ [webhook] priceId no encontrado en PRODUCTS, abortando");
+    return;
+  }
+
+  // Compra de nueva invitación (sin invitationId existente)
+  if (!invitationId && userId) {
+    console.log("🔔 [webhook] Ruta: nueva invitación con userId");
+    if (product.type === "plan") {
+      await createInvitationWithPlan(userId, product.value, session.metadata);
+    } else {
+      console.log(`❌ [webhook] product.type=${product.type}, se esperaba 'plan'`);
+    }
+    return;
+  }
+
+  if (!invitationId) {
+    console.log("❌ [webhook] Sin invitationId ni userId, abortando");
+    return;
+  }
+
+  console.log(`🔔 [webhook] Ruta: invitación existente id=${invitationId}`);
   switch (product.type) {
     case "credits":
       await incrementCredits(invitationId, product.value);
@@ -46,6 +79,7 @@ async function processingPayment(session) {
       break;
 
     default:
+      console.log(`❌ [webhook] product.type desconocido: ${product.type}`);
       break;
   }
 }
@@ -110,12 +144,63 @@ async function addSideEvent(invitationId) {
 }
 
 /**
+ * Inserta una invitación pendiente antes del pago y devuelve su ID
+ */
+async function createPendingInvitation(invitation) {
+  const { data, error } = await supabase
+    .from("invitations")
+    .insert([invitation])
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error("Error creando invitación pendiente:", error);
+    return null;
+  }
+
+  return data.id;
+}
+
+/**
+ * Crea una nueva invitación en Supabase con el plan comprado
+ */
+async function createInvitationWithPlan(userId, planName, metadata = {}) {
+  const { name, phoneNumber, label, userEmail } = metadata;
+
+  const payload = {
+    user_id: userId,
+    user_email: userEmail || null,
+    plan: planName,
+    label: label || null,
+    name: name || null,
+    phone_number: phoneNumber || null,
+    type: "closed",
+    active: true,
+    credits: planName === "pro" ? 300 : 0,
+    tickets: 300,
+    owners: [],
+    url_image: null,
+    data: null,
+  };
+
+  console.log("🔔 [webhook] createInvitationWithPlan payload:", JSON.stringify(payload));
+
+  const { error } = await supabase.from("invitations").insert(payload);
+
+  if (error) {
+    console.error("❌ [webhook] Error creando invitación:", JSON.stringify(error));
+  } else {
+    console.log("✅ [webhook] Invitación creada correctamente");
+  }
+}
+
+/**
  * Activación de plan (placeholder para futura lógica)
  */
 async function activatePlan(invitationId, planName) {
   const { error } = await supabase
     .from("invitations")
-    .update({ plan: planName })
+    .update({ plan: planName, active: true })
     .eq("id", invitationId);
 
   if (error) {
