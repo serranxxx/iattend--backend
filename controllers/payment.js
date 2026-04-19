@@ -141,13 +141,12 @@ router.post("/create-checkout-plan", async (req, res) => {
 router.get("/prices", async (req, res) => {
   try {
 
-    // Traer todos los prices activos
     const prices = await stripe.prices.list({
       active: true,
       expand: ["data.product"],
+      limit: 100,
     });
 
-    // Formatear respuesta limpia
     const formattedPrices = prices.data.map((price) => ({
       priceId: price.id,
       productName: price.product.name,
