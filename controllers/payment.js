@@ -70,7 +70,7 @@ router.post("/create-checkout-invitation", async (req, res) => {
       return res.status(400).json({ error: "priceId no válido para un plan" });
     }
 
-    const { userId, userEmail, name, phoneNumber, label, plan } = invitation;
+    const { userId, userEmail, name, phoneNumber, label, plan, owners } = invitation;
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
@@ -84,6 +84,7 @@ router.post("/create-checkout-invitation", async (req, res) => {
         phoneNumber: phoneNumber || "",
         label: label || "",
         plan: plan || "",
+        owners: owners ? JSON.stringify(owners) : "[]",
       },
       success_url: `https://www.iattend.site/dashboard?success=true`,
       cancel_url: `https://www.iattend.site/dashboard?canceled=true`,

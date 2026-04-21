@@ -135,7 +135,8 @@ async function createPendingInvitation(invitation) {
  * Crea una nueva invitación en Supabase con el plan comprado
  */
 async function createInvitationWithPlan(userId, planName, metadata = {}) {
-  const { name, phoneNumber, label, userEmail } = metadata;
+  const { name, phoneNumber, label, userEmail, owners: ownersRaw } = metadata;
+  const owners = ownersRaw ? JSON.parse(ownersRaw) : [];
 
   const payload = {
     user_id: userId,
@@ -148,7 +149,7 @@ async function createInvitationWithPlan(userId, planName, metadata = {}) {
     active: true,
     credits: planName === "pro" ? 300 : 0,
     tickets: 300,
-    owners: [],
+    owners,
     url_image: null,
     data: {
       cover: {
