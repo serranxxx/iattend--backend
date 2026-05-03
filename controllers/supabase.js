@@ -1,4 +1,6 @@
 const supabase = require("../config/supabase");
+const { sendMail } = require("./mailer");
+const { giftEmailTemplate } = require("./templates/giftEmail");
 
 /**
  * Catálogo de productos indexado por priceId
@@ -26,8 +28,13 @@ async function processingPayment(session) {
 
   if (!session?.metadata) return;
 
-  const { invitationId, userId, priceId } = session.metadata;
+  const { invitationId, userId, priceId, giftType } = session.metadata;
   if (!priceId) return;
+
+  if (giftType === "gift") {
+    await processGiftPayment(session.metadata);
+    return;
+  }
 
   const product = PRODUCTS[priceId];
   if (!product) return;
@@ -272,6 +279,52 @@ async function activatePlan(invitationId, planName) {
   }
 }
 
+async function processGiftPayment(metadata) {
+  const { giftEmail, senderName, recipientName, giftMessage } = metadata;
+  if (!giftEmail) return;
+
+  const giftCode = Math.floor(100000 + Math.random() * 900000).toString();
+  const email = giftEmail.toLowerCase();
+
+  const { data: existingUsers } = await supabase.auth.admin.listUsers();
+  const alreadyExists = existingUsers?.users?.find(u => u.email === email);
+
+  if (!alreadyExists) {
+    const { data, error } = await supabase.auth.admin.createUser({
+      email,
+      password: giftCode,
+      email_confirm: true,
+    });
+
+    if (!error && data?.user) {
+      await supabase.from("profiles").insert({
+        user_id: data.user.id,
+        full_name: recipientName || "",
+        user_email: email,
+        role: "gift",
+        active: true,
+      });
+    } else if (error) {
+      console.error("Error creando usuario gift:", error);
+    }
+  }
+
+  const activationLink = `https://www.iattend.site/login`;
+  const html = giftEmailTemplate({
+    senderName: senderName || "Alguien especial",
+    personalMessage: giftMessage || "",
+    giftCode,
+    activationLink,
+  });
+
+  try {
+    await sendMail(email, "Alguien pensó en ti — I attend 🎁", html);
+  } catch (err) {
+    console.error("Error enviando gift email:", err.message);
+  }
+}
+
 module.exports = {
-  processingPayment
+  processingPayment,
+  createInvitationWithPlan,
 };

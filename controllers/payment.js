@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const Stripe = require("stripe");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+const { createInvitationWithPlan } = require("./supabase");
 
 /**
  * Crear sesión de Checkout
@@ -136,6 +137,60 @@ router.post("/create-checkout-plan", async (req, res) => {
   } catch (error) {
     console.error("❌ Error creando checkout de plan:", error.message);
     return res.status(500).json({ error: "Error creando checkout" });
+  }
+});
+
+router.post("/create-checkout-gift", async (req, res) => {
+  try {
+    const { senderName, recipientName, email, giftMessage, priceId } = req.body;
+
+    if (!email || !priceId) {
+      return res.status(400).json({ error: "email y priceId son requeridos" });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      mode: "payment",
+      line_items: [{ price: priceId, quantity: 1 }],
+      metadata: {
+        giftType: "gift",
+        priceId,
+        giftEmail: email,
+        senderName: senderName || "",
+        recipientName: recipientName || "",
+        giftMessage: giftMessage ? giftMessage.slice(0, 490) : "",
+      },
+      success_url: `https://www.iattend.site/dashboard?gift=sent`,
+      cancel_url: `https://www.iattend.site/dashboard`,
+    });
+
+    return res.status(200).json({ url: session.url });
+
+  } catch (error) {
+    console.error("❌ Error creando checkout gift:", error.message);
+    return res.status(500).json({ error: "Error creando checkout" });
+  }
+});
+
+router.post("/create-free", async (req, res) => {
+  const { userId, userEmail, name, phoneNumber, label, plan, owners } = req.body;
+
+  if (!userId || !plan || !name) {
+    return res.status(400).json({ ok: false, msg: "userId, plan y name son requeridos" });
+  }
+
+  try {
+    await createInvitationWithPlan(userId, plan, {
+      userEmail: userEmail || "",
+      name,
+      phoneNumber: phoneNumber || "",
+      label: label || "",
+      owners: owners ? JSON.stringify(owners) : "[]",
+    });
+
+    return res.status(201).json({ ok: true, msg: "Invitación creada" });
+  } catch (error) {
+    return res.status(500).json({ ok: false, msg: error.message || "Internal Server Error" });
   }
 });
 

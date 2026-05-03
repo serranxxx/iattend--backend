@@ -1,5 +1,6 @@
 require('dotenv').config();
 const nodemailer = require('nodemailer');
+const { giftEmailTemplate } = require('./templates/giftEmail');
 
 // Configura el transporte SMTP
 const transporter = nodemailer.createTransport({
@@ -42,4 +43,21 @@ async function handleSendMail(req, res) {
   }
 }
 
-module.exports = { handleSendMail };
+async function handleSendGiftMail(req, res) {
+  const { to, senderName, personalMessage, giftCode, activationLink } = req.body;
+
+  if (!to || !senderName || !personalMessage || !giftCode || !activationLink) {
+    return res.status(400).json({ error: 'Campos requeridos: to, senderName, personalMessage, giftCode, activationLink' });
+  }
+
+  try {
+    const html = giftEmailTemplate({ senderName, personalMessage, giftCode, activationLink });
+    const info = await sendMail(to, 'Alguien pensó en ti — I Attend 🎁', html);
+    res.status(200).json({ mensaje: 'Gift email enviado', info: info.response });
+  } catch (error) {
+    console.error('Error enviando gift email:', error);
+    res.status(500).json({ error: 'Error al enviar correo', detalle: error.message });
+  }
+}
+
+module.exports = { handleSendMail, handleSendGiftMail, sendMail };
