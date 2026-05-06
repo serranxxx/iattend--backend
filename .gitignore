@@ -1,2 +1,8 @@
 .env
 .env
+certificates/
+*.p12
+*.cer
+*.pem
+*.key
+*.certSigningRequest
