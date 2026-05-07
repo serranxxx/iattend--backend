@@ -1,0 +1,12 @@
+{
+  "formatVersion": 1,
+  "passTypeIdentifier": "pass.placeholder",
+  "teamIdentifier": "PLACEHOLDER",
+  "organizationName": "I attend",
+  "description": "I attend – Pase de invitado",
+  "foregroundColor": "rgb(255, 255, 255)",
+  "backgroundColor": "rgb(10, 10, 10)",
+  "labelColor": "rgb(200, 200, 200)",
+  "preferredStyleSchemes": ["posterEventTicket", "eventTicket"],
+  "eventTicket": {}
+}

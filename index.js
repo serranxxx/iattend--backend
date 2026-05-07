@@ -88,6 +88,7 @@ app.use('/api/whats', require('./router/whatsapp'));
 app.use('/api/invitation', require('./router/invitation'));
 app.use("/api/payment", require("./controllers/payment"));
 app.use('/api/webhook', require('./router/webhook'));
+app.use('/api/wallet', require('./router/wallet'));
 
 
 // Escuchar peticiones
