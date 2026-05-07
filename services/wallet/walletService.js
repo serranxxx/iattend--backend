@@ -137,9 +137,18 @@ async function fetchImageBuffer(url) {
  * @returns {Promise<Buffer>}
  */
 async function generateWalletPass({ guestId, guestName, eventName, eventDate, eventTime, tableNumber, coverImageUrl, primaryColor, accentColor }) {
-    const p12Buffer = Buffer.from(process.env.APPLE_WALLET_P12_BASE64, 'base64');
-    const wwdrBuffer = Buffer.from(process.env.APPLE_WWDR_CERT_BASE64, 'base64');
+    const p12B64 = process.env.APPLE_WALLET_P12_BASE64;
+    const wwdrB64 = process.env.APPLE_WWDR_CERT_BASE64;
     const passphrase = process.env.APPLE_WALLET_CERT_PASSWORD;
+
+    const missing = [!p12B64 && 'APPLE_WALLET_P12_BASE64', !wwdrB64 && 'APPLE_WWDR_CERT_BASE64', !passphrase && 'APPLE_WALLET_CERT_PASSWORD'].filter(Boolean);
+    if (missing.length) throw new Error(`Missing required env vars: ${missing.join(', ')}`);
+
+    const p12Buffer = Buffer.from(p12B64, 'base64');
+    const wwdrBuffer = Buffer.from(wwdrB64, 'base64');
+
+    if (p12Buffer.length === 0) throw new Error('APPLE_WALLET_P12_BASE64 decoded to empty buffer — check the value in DigitalOcean');
+    if (wwdrBuffer.length === 0) throw new Error('APPLE_WWDR_CERT_BASE64 decoded to empty buffer — check the value in DigitalOcean');
 
     const { signerCert, signerKey } = extractFromP12(p12Buffer, passphrase);
     const wwdr = toPem(wwdrBuffer);
