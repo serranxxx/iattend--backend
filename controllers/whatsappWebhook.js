@@ -56,7 +56,7 @@ const findMatchingDispatch = async (fromPhone, messageTimestamp) => {
   const { data, error } = await supabase
     .from("invitation_message_dispatches")
     .select("id")
-    .eq("recipient_phone", fromPhone)
+    .eq("guest_phone", fromPhone)
     .not("delivered_at", "is", null)
     .lte("delivered_at", messageTimestamp)
     .gte("delivered_at", windowCutoff.toISOString())
