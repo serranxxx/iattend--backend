@@ -46,6 +46,15 @@ const processStatuses = async (statuses) => {
   }
 };
 
+const normalizePhone = (phone) => {
+  // México: 5216XXXXXXXXX → 526XXXXXXXXX
+  // Quita el "1" después del código de país 52
+  if (phone.startsWith('521') && phone.length === 13) {
+    return '52' + phone.slice(3);
+  }
+  return phone;
+};
+
 
 const REPLY_WINDOW_HOURS = 72;
 
@@ -53,25 +62,18 @@ const findMatchingDispatch = async (fromPhone, messageTimestamp) => {
   const windowCutoff = new Date(messageTimestamp);
   windowCutoff.setHours(windowCutoff.getHours() - REPLY_WINDOW_HOURS);
 
+  const normalizedPhone = normalizePhone(fromPhone);
+
   const { data, error } = await supabase
     .from("invitation_message_dispatches")
     .select("id, guest_phone, delivered_at")
-    .eq("guest_phone", fromPhone)
+    .eq("guest_phone", normalizedPhone)
     .not("delivered_at", "is", null)
     .lte("delivered_at", messageTimestamp)
     .gte("delivered_at", windowCutoff.toISOString())
     .order("delivered_at", { ascending: false })
     .limit(1)
     .single();
-
-  // Guardar intento en tabla de debug
-  await supabase.from("webhook_debug_log").insert({
-    from_phone: fromPhone,
-    message_timestamp: messageTimestamp,
-    window_cutoff: windowCutoff.toISOString(),
-    query_result: data ?? null,
-    query_error: error ?? null,
-  });
 
   if (error || !data) return null;
   return data.id;
@@ -142,7 +144,7 @@ const processIncomingMessages = async (messages, contacts = []) => {
 
     const record = {
       wa_message_id: message.id,
-      from_phone: message.from,
+      from_phone: normalizePhone(message.from),
       contact_name: contactMap[message.from] ?? null,
       message_type: message.type,
       message_body: body,
