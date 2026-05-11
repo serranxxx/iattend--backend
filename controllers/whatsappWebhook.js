@@ -55,7 +55,7 @@ const findMatchingDispatch = async (fromPhone, messageTimestamp) => {
 
   const { data, error } = await supabase
     .from("invitation_message_dispatches")
-    .select("id")
+    .select("id, guest_phone, delivered_at")
     .eq("guest_phone", fromPhone)
     .not("delivered_at", "is", null)
     .lte("delivered_at", messageTimestamp)
@@ -63,6 +63,15 @@ const findMatchingDispatch = async (fromPhone, messageTimestamp) => {
     .order("delivered_at", { ascending: false })
     .limit(1)
     .single();
+
+  // Guardar intento en tabla de debug
+  await supabase.from("webhook_debug_log").insert({
+    from_phone: fromPhone,
+    message_timestamp: messageTimestamp,
+    window_cutoff: windowCutoff.toISOString(),
+    query_result: data ?? null,
+    query_error: error ?? null,
+  });
 
   if (error || !data) return null;
   return data.id;
