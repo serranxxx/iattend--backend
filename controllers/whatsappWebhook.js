@@ -38,6 +38,7 @@ const processStatuses = async (statuses) => {
         status: newStatus,
         recipient_id: recipientId,
         raw_webhook: statusItem,
+        ...(newStatus === 'delivered' && { delivered_at: new Date().toISOString() }),
       })
       .eq("meta_message_id", metaMessageId);
 
@@ -46,8 +47,29 @@ const processStatuses = async (statuses) => {
 };
 
 
+const REPLY_WINDOW_HOURS = 72;
+
+const findMatchingDispatch = async (fromPhone, messageTimestamp) => {
+  const windowCutoff = new Date(messageTimestamp);
+  windowCutoff.setHours(windowCutoff.getHours() - REPLY_WINDOW_HOURS);
+
+  const { data, error } = await supabase
+    .from("invitation_message_dispatches")
+    .select("id")
+    .eq("recipient_phone", fromPhone)
+    .not("delivered_at", "is", null)
+    .lte("delivered_at", messageTimestamp)
+    .gte("delivered_at", windowCutoff.toISOString())
+    .order("delivered_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error || !data) return null;
+  return data.id;
+};
+
+
 const extractMessageContent = (message) => {
-  // Devuelve { body, mediaId } según el tipo de mensaje
   switch (message.type) {
     case 'text':
       return { body: message.text?.body ?? null, mediaId: null };
@@ -67,10 +89,8 @@ const extractMessageContent = (message) => {
         mediaId: null,
       };
     case 'button':
-      // Respuesta a botones de template
       return { body: message.button?.text ?? null, mediaId: null };
     case 'interactive':
-      // Respuesta a listas o botones interactivos
       return {
         body:
           message.interactive?.button_reply?.title ??
@@ -85,13 +105,31 @@ const extractMessageContent = (message) => {
 
 
 const processIncomingMessages = async (messages, contacts = []) => {
-  // Construir mapa de contactos para enriquecer con nombre
   const contactMap = Object.fromEntries(
     contacts.map((c) => [c.wa_id, c.profile?.name ?? null])
   );
 
   for (const message of messages) {
     const { body, mediaId } = extractMessageContent(message);
+    const messageTimestamp = new Date(Number(message.timestamp) * 1000).toISOString();
+
+    // Intentar linkear por context explícito (reply) primero
+    let dispatchId = null;
+
+    if (message.context?.id) {
+      const { data } = await supabase
+        .from("invitation_message_dispatches")
+        .select("id")
+        .eq("meta_message_id", message.context.id)
+        .single();
+
+      dispatchId = data?.id ?? null;
+    }
+
+    // Si no hubo reply explícito, usar ventana de delivered_at
+    if (!dispatchId) {
+      dispatchId = await findMatchingDispatch(message.from, messageTimestamp);
+    }
 
     const record = {
       wa_message_id: message.id,
@@ -100,15 +138,16 @@ const processIncomingMessages = async (messages, contacts = []) => {
       message_type: message.type,
       message_body: body,
       media_id: mediaId,
-      timestamp: new Date(Number(message.timestamp) * 1000).toISOString(),
+      timestamp: messageTimestamp,
       raw_message: message,
+      dispatch_id: dispatchId,
     };
 
-    console.log("Incoming message from:", message.from, "|", message.type);
+    console.log("Incoming message from:", message.from, "|", message.type, "| dispatch:", dispatchId ?? "no match");
 
     const { error } = await supabase
       .from("whatsapp_incoming_messages")
-      .upsert(record, { onConflict: "wa_message_id" }); // evita duplicados si el webhook reintenta
+      .upsert(record, { onConflict: "wa_message_id" });
 
     if (error) console.error("Supabase insert error:", error);
   }
@@ -130,12 +169,10 @@ const receiveWhatsappWebhook = async (req, res) => {
         const value = change.value;
         if (!value) continue;
 
-        // Actualizaciones de estado (sent, delivered, read, failed)
         if (value.statuses?.length) {
           await processStatuses(value.statuses);
         }
 
-        // Mensajes entrantes de destinatarios
         if (value.messages?.length) {
           await processIncomingMessages(value.messages, value.contacts ?? []);
         }
