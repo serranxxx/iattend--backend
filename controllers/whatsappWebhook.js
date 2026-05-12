@@ -69,13 +69,58 @@ const normalizePhone = (phone) => {
 };
 
 
-const REPLY_WINDOW_HOURS = 72;
-
 const findMatchingDispatch = async (fromPhone, messageTimestamp) => {
+  const normalizedPhone = normalizePhone(fromPhone);
+
+  // Formato para buscar en guests (ellos guardan con +)
+  const phoneWithPlus = normalizedPhone.startsWith('+')
+    ? normalizedPhone
+    : `+${normalizedPhone}`;
+
+  // 1. Buscar en guests por número de teléfono
+  const { data: guests, error: guestsError } = await supabase
+    .from("guests")
+    .select("id, invitation_id, phone_number")
+    .eq("phone_number", phoneWithPlus);
+
+  if (guestsError || !guests || guests.length === 0) {
+    // No encontró en guests, fallback a lógica original de ventana de tiempo
+    return await findDispatchByTimeWindow(normalizedPhone, messageTimestamp);
+  }
+
+  // 2. Si está en un solo evento
+  if (guests.length === 1) {
+    const { data: dispatch } = await supabase
+      .from("invitation_message_dispatches")
+      .select("id")
+      .eq("invitation_id", guests[0].invitation_id)
+      .eq("guest_phone", normalizedPhone)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    return dispatch?.id || null;
+  }
+
+  // 3. Si está en dos o más eventos, buscar el template más reciente
+  const invitationIds = guests.map(g => g.invitation_id);
+
+  const { data: dispatch } = await supabase
+    .from("invitation_message_dispatches")
+    .select("id, invitation_id, created_at")
+    .eq("guest_phone", normalizedPhone)
+    .in("invitation_id", invitationIds)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  return dispatch?.id || null;
+};
+
+const findDispatchByTimeWindow = async (normalizedPhone, messageTimestamp) => {
+  const REPLY_WINDOW_HOURS = 72;
   const windowCutoff = new Date(messageTimestamp);
   windowCutoff.setHours(windowCutoff.getHours() - REPLY_WINDOW_HOURS);
-
-  const normalizedPhone = normalizePhone(fromPhone);
 
   const { data, error } = await supabase
     .from("invitation_message_dispatches")

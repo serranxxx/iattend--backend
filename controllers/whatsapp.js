@@ -138,6 +138,7 @@ const sendWhatsappFreeText = async (req, res) => {
         to_phone: normalizedPhone,
         message_body: text,
         status: 'processing',
+        dispatch_id: req.body.dispatch_id || null,
         raw_send_response: data,
       })
       .select()
