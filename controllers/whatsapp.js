@@ -91,9 +91,9 @@ const sendWhatsappTemplate = async (req, res = express.response) => {
 
 const sendWhatsappFreeText = async (req, res) => {
   try {
-    const { to, text } = req.body;
+     const { to, text, invitation_id } = req.body;
 
-    if (!to || !text) {
+    if (!to || !text || !invitation_id)  {
       return res.status(400).json({
         ok: false,
         msg: 'Missing required fields: to, text',
@@ -138,7 +138,7 @@ const sendWhatsappFreeText = async (req, res) => {
         to_phone: normalizedPhone,
         message_body: text,
         status: 'processing',
-        dispatch_id: req.body.dispatch_id || null,
+        invitation_id: invitation_id,  
         raw_send_response: data,
       })
       .select()
@@ -146,6 +146,12 @@ const sendWhatsappFreeText = async (req, res) => {
 
     if (dispatchError) {
       console.error('Error saving freetext dispatch:', dispatchError);
+      return res.status(500).json({
+        ok: false,
+        msg: 'WhatsApp message sent but failed to save in Supabase',
+        error: dispatchError.message,
+        data,
+      });
     }
 
     return res.status(200).json({
