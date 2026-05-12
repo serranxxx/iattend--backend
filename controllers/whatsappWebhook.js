@@ -32,7 +32,8 @@ const processStatuses = async (statuses) => {
 
     console.log("Status update:", metaMessageId, newStatus);
 
-    const { error } = await supabase
+    // Intentar actualizar en tabla de templates
+    const { error: templateError, count } = await supabase
       .from("invitation_message_dispatches")
       .update({
         status: newStatus,
@@ -42,10 +43,22 @@ const processStatuses = async (statuses) => {
       })
       .eq("meta_message_id", metaMessageId);
 
-    if (error) console.error("Supabase status update error:", error);
+    if (templateError) console.error("Supabase template status update error:", templateError);
+
+    // Intentar actualizar en tabla de freetext
+    const { error: freetextError } = await supabase
+      .from("whatsapp_freetext_dispatches")
+      .update({
+        status: newStatus,
+        raw_webhook: statusItem,
+        ...(newStatus === 'delivered' && { delivered_at: new Date().toISOString() }),
+        ...(newStatus === 'read' && { read_at: new Date().toISOString() }),
+      })
+      .eq("meta_message_id", metaMessageId);
+
+    if (freetextError) console.error("Supabase freetext status update error:", freetextError);
   }
 };
-
 const normalizePhone = (phone) => {
   // México: 5216XXXXXXXXX → 526XXXXXXXXX
   // Quita el "1" después del código de país 52

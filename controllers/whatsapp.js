@@ -89,4 +89,79 @@ const sendWhatsappTemplate = async (req, res = express.response) => {
   }
 };
 
-module.exports = { sendWhatsappTemplate };
+const sendWhatsappFreeText = async (req, res) => {
+  try {
+    const { to, text } = req.body;
+
+    if (!to || !text) {
+      return res.status(400).json({
+        ok: false,
+        msg: 'Missing required fields: to, text',
+      });
+    }
+
+    const phoneNumberId = process.env.WA_PHONE_NUMBER_ID;
+    const token = process.env.WA_ACCESS_TOKEN;
+
+    const normalizedPhone = to.startsWith('521') && to.length === 13
+      ? to.replace('521', '52')
+      : to;
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: normalizedPhone,
+      type: 'text',
+      text: {
+        preview_url: false,
+        body: text,
+      },
+    };
+
+    const { data } = await axios.post(
+      `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    const metaMessageId = data?.messages?.[0]?.id || null;
+
+    const { data: dispatch, error: dispatchError } = await supabase
+      .from('whatsapp_freetext_dispatches')
+      .insert({
+        meta_message_id: metaMessageId,
+        to_phone: normalizedPhone,
+        message_body: text,
+        status: 'processing',
+        raw_send_response: data,
+      })
+      .select()
+      .single();
+
+    if (dispatchError) {
+      console.error('Error saving freetext dispatch:', dispatchError);
+    }
+
+    return res.status(200).json({
+      ok: true,
+      msg: 'WhatsApp free text sent',
+      data,
+      dispatch,
+    });
+
+  } catch (error) {
+    console.error('Error sending WhatsApp free text:', error?.response?.data || error.message);
+    return res.status(500).json({
+      ok: false,
+      msg: 'Error sending WhatsApp free text',
+      error: error?.response?.data || error.message,
+    });
+  }
+};
+
+module.exports = { sendWhatsappTemplate, sendWhatsappFreeText };
