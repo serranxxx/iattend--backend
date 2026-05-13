@@ -157,7 +157,7 @@ const findMatchingDispatch = async (fromPhone, messageTimestamp) => {
 };
 
 const findDispatchByTimeWindow = async (normalizedPhone, messageTimestamp) => {
-  const REPLY_WINDOW_HOURS = 72;
+  const REPLY_WINDOW_HOURS = 172;
   const windowCutoff = new Date(messageTimestamp);
   windowCutoff.setHours(windowCutoff.getHours() - REPLY_WINDOW_HOURS);
 
@@ -306,8 +306,26 @@ const receiveWhatsappWebhook = async (req, res) => {
 const getWhatsappMediaUrl = async (req, res) => {
   try {
     const { mediaId } = req.params;
-    const { url } = await fetchMediaMeta(mediaId);
-    return res.redirect(url);
+
+    const metaRes = await fetch(
+      `https://graph.facebook.com/v19.0/${mediaId}`,
+      { headers: { Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` } }
+    );
+    if (!metaRes.ok) throw new Error(`Meta metadata error: ${metaRes.statusText}`);
+    const { url, mime_type } = await metaRes.json();
+
+    const mediaRes = await fetch(url, {
+      headers: { Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` }
+    });
+    if (!mediaRes.ok) throw new Error(`Meta download error: ${mediaRes.statusText}`);
+
+    res.setHeader('Content-Type', mime_type ?? 'video/mp4');
+    res.setHeader('Content-Disposition', `inline; filename="${mediaId}.mp4"`);
+
+    // ← Convertir Web ReadableStream a Node stream
+    const { Readable } = require('stream');
+    Readable.fromWeb(mediaRes.body).pipe(res);
+
   } catch (error) {
     console.error('getWhatsappMediaUrl error:', error.message);
     return res.status(500).json({ ok: false, error: error.message });
