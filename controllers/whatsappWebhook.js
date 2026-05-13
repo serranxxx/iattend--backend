@@ -1,6 +1,9 @@
 const express = require('express');
 const supabase = require('../config/supabase');
 
+const MEDIA_TYPES_TO_DOWNLOAD = ['image', 'audio', 'document', 'sticker'];
+
+// ── Verificación del webhook ───────────────────────────────────────────────
 
 const verifyWhatsappWebhook = async (req, res = express.response) => {
   try {
@@ -23,8 +26,50 @@ const verifyWhatsappWebhook = async (req, res = express.response) => {
   }
 };
 
+// ── Media helpers ─────────────────────────────────────────────────────────
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+const fetchMediaMeta = async (mediaId) => {
+  const response = await fetch(
+    `https://graph.facebook.com/v19.0/${mediaId}`,
+    { headers: { Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` } }
+  );
+  if (!response.ok) throw new Error(`Meta media meta error: ${response.statusText}`);
+  return response.json(); // { url, mime_type, file_size, ... }
+};
+
+const downloadMedia = async (url) => {
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` },
+  });
+  if (!response.ok) throw new Error(`Media download error: ${response.statusText}`);
+  return Buffer.from(await response.arrayBuffer());
+};
+
+const uploadToStorage = async (mediaId, buffer, mimeType) => {
+  const ext = mimeType?.split('/')[1]?.split(';')[0] ?? 'bin';
+  const path = `whatsapp-media/${mediaId}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from('media') // ← tu bucket
+    .upload(path, buffer, { contentType: mimeType, upsert: true });
+
+  if (error) throw new Error(`Storage upload error: ${error.message}`);
+
+  return supabase.storage.from('media').getPublicUrl(path).data.publicUrl;
+};
+
+const resolveMediaUrl = async (mediaId) => {
+  try {
+    const { url, mime_type } = await fetchMediaMeta(mediaId);
+    const buffer = await downloadMedia(url);
+    return await uploadToStorage(mediaId, buffer, mime_type);
+  } catch (err) {
+    console.error('resolveMediaUrl error:', err.message);
+    return null;
+  }
+};
+
+// ── Status helpers ────────────────────────────────────────────────────────
 
 const processStatuses = async (statuses) => {
   for (const statusItem of statuses) {
@@ -32,8 +77,7 @@ const processStatuses = async (statuses) => {
 
     console.log("Status update:", metaMessageId, newStatus);
 
-    // Intentar actualizar en tabla de templates
-    const { error: templateError, count } = await supabase
+    const { error: templateError } = await supabase
       .from("invitation_message_dispatches")
       .update({
         status: newStatus,
@@ -45,7 +89,6 @@ const processStatuses = async (statuses) => {
 
     if (templateError) console.error("Supabase template status update error:", templateError);
 
-    // Intentar actualizar en tabla de freetext
     const { error: freetextError } = await supabase
       .from("whatsapp_freetext_dispatches")
       .update({
@@ -59,36 +102,33 @@ const processStatuses = async (statuses) => {
     if (freetextError) console.error("Supabase freetext status update error:", freetextError);
   }
 };
+
+// ── Phone helpers ─────────────────────────────────────────────────────────
+
 const normalizePhone = (phone) => {
-  // México: 5216XXXXXXXXX → 526XXXXXXXXX
-  // Quita el "1" después del código de país 52
   if (phone.startsWith('521') && phone.length === 13) {
     return '52' + phone.slice(3);
   }
   return phone;
 };
 
+// ── Dispatch matching ─────────────────────────────────────────────────────
 
 const findMatchingDispatch = async (fromPhone, messageTimestamp) => {
   const normalizedPhone = normalizePhone(fromPhone);
-
-  // Formato para buscar en guests (ellos guardan con +)
   const phoneWithPlus = normalizedPhone.startsWith('+')
     ? normalizedPhone
     : `+${normalizedPhone}`;
 
-  // 1. Buscar en guests por número de teléfono
   const { data: guests, error: guestsError } = await supabase
     .from("guests")
     .select("id, invitation_id, phone_number")
     .eq("phone_number", phoneWithPlus);
 
   if (guestsError || !guests || guests.length === 0) {
-    // No encontró en guests, fallback a lógica original de ventana de tiempo
     return await findDispatchByTimeWindow(normalizedPhone, messageTimestamp);
   }
 
-  // 2. Si está en un solo evento
   if (guests.length === 1) {
     const { data: dispatch } = await supabase
       .from("invitation_message_dispatches")
@@ -102,7 +142,6 @@ const findMatchingDispatch = async (fromPhone, messageTimestamp) => {
     return dispatch?.id || null;
   }
 
-  // 3. Si está en dos o más eventos, buscar el template más reciente
   const invitationIds = guests.map(g => g.invitation_id);
 
   const { data: dispatch } = await supabase
@@ -137,41 +176,40 @@ const findDispatchByTimeWindow = async (normalizedPhone, messageTimestamp) => {
   return data.id;
 };
 
+// ── Message content extractor ─────────────────────────────────────────────
 
 const extractMessageContent = (message) => {
   switch (message.type) {
     case 'text':
-      return { body: message.text?.body ?? null, mediaId: null };
+      return { body: message.text?.body ?? null, mediaId: null, reactedToId: null };
     case 'image':
-      return { body: message.image?.caption ?? null, mediaId: message.image?.id ?? null };
+      return { body: message.image?.caption ?? null, mediaId: message.image?.id ?? null, reactedToId: null };
     case 'video':
-      return { body: message.video?.caption ?? null, mediaId: message.video?.id ?? null };
+      return { body: message.video?.caption ?? null, mediaId: message.video?.id ?? null, reactedToId: null };
     case 'audio':
-      return { body: null, mediaId: message.audio?.id ?? null };
+      return { body: null, mediaId: message.audio?.id ?? null, reactedToId: null };
     case 'document':
-      return { body: message.document?.filename ?? null, mediaId: message.document?.id ?? null };
+      return { body: message.document?.filename ?? null, mediaId: message.document?.id ?? null, reactedToId: null };
     case 'sticker':
-      return { body: null, mediaId: message.sticker?.id ?? null };
+      return { body: null, mediaId: message.sticker?.id ?? null, reactedToId: null };
+    case 'reaction':
+      return { body: message.reaction?.emoji ?? null, mediaId: null, reactedToId: message.reaction?.message_id ?? null };
     case 'location':
-      return {
-        body: `lat:${message.location?.latitude}, lng:${message.location?.longitude}`,
-        mediaId: null,
-      };
+      return { body: `lat:${message.location?.latitude}, lng:${message.location?.longitude}`, mediaId: null, reactedToId: null };
     case 'button':
-      return { body: message.button?.text ?? null, mediaId: null };
+      return { body: message.button?.text ?? null, mediaId: null, reactedToId: null };
     case 'interactive':
       return {
-        body:
-          message.interactive?.button_reply?.title ??
-          message.interactive?.list_reply?.title ??
-          null,
+        body: message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? null,
         mediaId: null,
+        reactedToId: null,
       };
     default:
-      return { body: null, mediaId: null };
+      return { body: null, mediaId: null, reactedToId: null };
   }
 };
 
+// ── Procesamiento de mensajes entrantes ───────────────────────────────────
 
 const processIncomingMessages = async (messages, contacts = []) => {
   const contactMap = Object.fromEntries(
@@ -179,10 +217,15 @@ const processIncomingMessages = async (messages, contacts = []) => {
   );
 
   for (const message of messages) {
-    const { body, mediaId } = extractMessageContent(message);
+    const { body, mediaId, reactedToId } = extractMessageContent(message);
     const messageTimestamp = new Date(Number(message.timestamp) * 1000).toISOString();
 
-    // Intentar linkear por context explícito (reply) primero
+    // Descargar y subir a storage solo los tipos que no son video
+    let mediaUrl = null;
+    if (mediaId && MEDIA_TYPES_TO_DOWNLOAD.includes(message.type)) {
+      mediaUrl = await resolveMediaUrl(mediaId);
+    }
+
     let dispatchId = null;
 
     if (message.context?.id) {
@@ -191,39 +234,42 @@ const processIncomingMessages = async (messages, contacts = []) => {
         .select("id")
         .eq("meta_message_id", message.context.id)
         .single();
-
       dispatchId = data?.id ?? null;
     }
 
-    // Si no hubo reply explícito, usar ventana de delivered_at
     if (!dispatchId) {
       dispatchId = await findMatchingDispatch(message.from, messageTimestamp);
     }
 
     const record = {
-      wa_message_id: message.id,
-      from_phone: normalizePhone(message.from),
-      contact_name: contactMap[message.from] ?? null,
-      message_type: message.type,
-      message_body: body,
-      media_id: mediaId,
-      timestamp: messageTimestamp,
-      raw_message: message,
-      dispatch_id: dispatchId,
+      wa_message_id:          message.id,
+      from_phone:              normalizePhone(message.from),
+      contact_name:            contactMap[message.from] ?? null,
+      message_type:            message.type,
+      message_body:            body,
+      media_id:                mediaId ?? null,
+      media_url:               mediaUrl ?? null,
+      reacted_to_message_id:  reactedToId ?? null,
+      timestamp:               messageTimestamp,
+      raw_message:             message,
+      dispatch_id:             dispatchId,
     };
 
-    console.log("Incoming message from:", message.from, "|", message.type, "| dispatch:", dispatchId ?? "no match");
+    console.log(
+      `[WA] from:${message.from} | type:${message.type}`,
+      mediaId ? `| media:${mediaUrl ?? 'id-only (video)'}` : '',
+      `| dispatch:${dispatchId ?? 'no match'}`
+    );
 
     const { error } = await supabase
       .from("whatsapp_incoming_messages")
       .upsert(record, { onConflict: "wa_message_id" });
 
-    if (error) console.error("Supabase insert error:", error);
+    if (error) console.error("Supabase upsert error:", error);
   }
 };
 
-
-// ── Controlador principal ──────────────────────────────────────────────────
+// ── Controlador principal ─────────────────────────────────────────────────
 
 const receiveWhatsappWebhook = async (req, res) => {
   try {
@@ -255,8 +301,21 @@ const receiveWhatsappWebhook = async (req, res) => {
   }
 };
 
+// ── Endpoint on-demand para videos ───────────────────────────────────────
+
+const getWhatsappMediaUrl = async (req, res) => {
+  try {
+    const { mediaId } = req.params;
+    const { url } = await fetchMediaMeta(mediaId);
+    return res.redirect(url);
+  } catch (error) {
+    console.error('getWhatsappMediaUrl error:', error.message);
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+};
 
 module.exports = {
   verifyWhatsappWebhook,
   receiveWhatsappWebhook,
+  getWhatsappMediaUrl,
 };
