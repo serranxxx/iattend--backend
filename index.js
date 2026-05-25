@@ -44,6 +44,8 @@ app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
 app.use('/drafts', express.static('drafts'));
 
+app.use('/api/ai/credits', require('./router/ai.credits.route'));
+
 app.post(
     "/api/payment/webhook",
     express.raw({ type: "application/json" }),
@@ -83,6 +85,7 @@ app.use('/api/rsvp', require('./router/rsvp'));
 app.use('/api/tags', require('./router/taginvitation'));
 app.use('/api/guests', require('./router/guests'));
 app.use('/api/ai', require('./router/iattendai'));
+app.use('/api/ai', require('./router/ai.chat.route'));
 app.use('/api/mail', require('./router/mailer'));
 app.use('/api/whats', require('./router/whatsapp'));
 app.use('/api/invitation', require('./router/invitation'));
