@@ -1,25 +1,67 @@
 const supabase = require("../config/supabase");
 const { sendMail } = require("./mailer");
 const { giftEmailTemplate } = require("./templates/giftEmail");
+const { PRODUCTS } = require("../config/stripe.products");
 
 /**
- * Catálogo de productos indexado por priceId
+ * Guarda preview data en checkout_queue y devuelve el ID
  */
-const PRODUCTS = {
-  price_1T1DRoAAdNlITNVbLwiUVWAj: { type: "credits", value: 3 },
-  price_1Sx8PvAAdNlITNVbchl6tJBW: { type: "credits", value: 50 },
-  price_1Sx8QpAAdNlITNVbIod9MW44: { type: "credits", value: 100 },
-  price_1Sx8RWAAdNlITNVbj7c85GlG: { type: "credits", value: 200 },
-  price_1T1H17AAdNlITNVbrTS94Xdr: { type: "credits", value: 1 },
+async function createCheckoutQueue(userId, userEmail, data) {
+  const { data: row, error } = await supabase
+    .from("checkout_queue")
+    .insert({ user_id: userId, user_email: userEmail || null, data: data || null })
+    .select("id")
+    .single();
 
-  price_1SkRvtAAdNlITNVbj8BA6F2Q: { type: "plan", value: "paperless" },
-  price_1SkRwZAAdNlITNVbEsPlYN0F: { type: "plan", value: "lite" },
-  price_1SkRxCAAdNlITNVbB0AB16LN: { type: "plan", value: "pro" },
-  price_1TO1kjAAdNlITNVbmfuaY1nm: { type: "plan", value: "pro" },
+  if (error) {
+    console.error("Error guardando checkout queue:", error);
+    return null;
+  }
+  return row.id;
+}
 
-  price_1T1VeXAAdNlITNVbXeWLTh3Y: { type: "side", value: "side_event" },
-  price_1T1WY5AAdNlITNVbGrRJx77i: {type: "side", value: "side_event"}
-};
+/**
+ * Crea la invitación final a partir del queue (se llama desde el webhook)
+ */
+async function createInvitationFromQueue(queueId, planName) {
+  const { data: entry, error: fetchError } = await supabase
+    .from("checkout_queue")
+    .select("*")
+    .eq("id", queueId)
+    .single();
+
+  if (fetchError || !entry) {
+    console.error("checkout_queue entry no encontrado:", queueId, fetchError);
+    return;
+  }
+
+  const { user_id, user_email, data } = entry;
+
+  const payload = {
+    user_id,
+    user_email: user_email || null,
+    plan: planName,
+    label: data?.generals?.event?.label || null,
+    name: data?.generals?.event?.name || null,
+    phone_number: null,
+    type: "closed",
+    active: true,
+    credits: planName === "pro" ? 300 : 0,
+    tickets: 300,
+    owners: [],
+    url_image: null,
+    data: data || {},
+  };
+
+  const { error: insertError } = await supabase.from("invitations").insert(payload);
+
+  if (insertError) {
+    console.error("Error creando invitación desde queue:", insertError);
+    return;
+  }
+
+  await supabase.from("checkout_queue").delete().eq("id", queueId);
+}
 
 /**
  * Procesa el pago desde una sesión de Stripe
@@ -28,7 +70,7 @@ async function processingPayment(session) {
 
   if (!session?.metadata) return;
 
-  const { invitationId, userId, priceId, giftType } = session.metadata;
+  const { invitationId, userId, queueId, priceId, giftType } = session.metadata;
   if (!priceId) return;
 
   if (giftType === "gift") {
@@ -38,6 +80,12 @@ async function processingPayment(session) {
 
   const product = PRODUCTS[priceId];
   if (!product) return;
+
+  // Preview/checkout flow: create invitation from queued data after payment
+  if (queueId && product.type === "plan") {
+    await createInvitationFromQueue(queueId, product.value);
+    return;
+  }
 
   if (!invitationId && userId) {
     if (product.type === "plan") {
@@ -210,7 +258,7 @@ async function createInvitationWithPlan(userId, planName, metadata = {}) {
         dynamic_background: { color: "#939faf", shape: "square", width: 90, active: false, shadow: true, texture: null, border_radius: 0 },
       },
       generals: {
-        event: { name: "test", label: "wedding" },
+        event: { name: name || null, label: label || null, },
         fonts: {
           body: { size: 0, color: "#000000", value: "Noto Sans", weight: 0, opacity: 1, typeFace: "Noto Sans" },
           titles: { size: 0, color: "#000000", value: "Noto Sans", weight: 0, opacity: 1, typeFace: "Noto Sans" },
@@ -271,7 +319,11 @@ async function createInvitationWithPlan(userId, planName, metadata = {}) {
 async function activatePlan(invitationId, planName) {
   const { error } = await supabase
     .from("invitations")
-    .update({ plan: planName, active: true })
+    .update({
+      plan: planName,
+      active: true,
+      credits: planName === "pro" ? 300 : 0,
+    })
     .eq("id", invitationId);
 
   if (error) {
@@ -327,4 +379,5 @@ async function processGiftPayment(metadata) {
 module.exports = {
   processingPayment,
   createInvitationWithPlan,
+  createCheckoutQueue,
 };

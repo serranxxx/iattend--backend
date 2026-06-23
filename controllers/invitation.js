@@ -204,12 +204,85 @@ const AddNewOwner = async (req, res = response) => {
   };
 
 
-module.exports = { 
+const createInvitationFromPreview = async (req, res) => {
+    const { user_id, user_email, plan, data } = req.body;
+
+    if (!user_id || !data) {
+        return res.status(400).json({ ok: false, msg: 'user_id y data son requeridos' });
+    }
+
+    const planName = plan === 'pro' ? 'pro' : plan === 'lite' ? 'lite' : null;
+
+    const invData = {
+        ...data,
+        generals: {
+            ...data?.generals,
+            event: { label: null, name: null },
+        },
+    };
+
+    const payload = {
+        user_id,
+        user_email: user_email || '',
+        plan: planName,
+        label: null,
+        name: null,
+        phone_number: null,
+        type: 'closed',
+        active: planName !== null,
+        credits: planName === 'pro' ? 300 : 0,
+        tickets: 300,
+        owners: [],
+        url_image: null,
+        data: invData,
+    };
+
+    try {
+        const { data: inv, error } = await supabase
+            .from('invitations')
+            .insert(payload)
+            .select('id')
+            .single();
+
+        if (error) return res.status(400).json({ ok: false, msg: error.message });
+        return res.status(201).json({ ok: true, id: inv.id });
+    } catch (err) {
+        return res.status(500).json({ ok: false, msg: err.message || 'Internal Server Error' });
+    }
+};
+
+const setPlan = async (req, res) => {
+    const { id, plan } = req.body;
+
+    if (!id || !plan) {
+        return res.status(400).json({ ok: false, msg: 'id y plan son requeridos' });
+    }
+
+    const planName = plan === 'pro' ? 'pro' : 'lite';
+
+    try {
+        const { error } = await supabase
+            .from('invitations')
+            .update({
+                plan: planName,
+                credits: planName === 'pro' ? 300 : 0,
+                active: true,
+            })
+            .eq('id', id);
+
+        if (error) return res.status(400).json({ ok: false, msg: error.message });
+        return res.status(200).json({ ok: true });
+    } catch (err) {
+        return res.status(500).json({ ok: false, msg: err.message || 'Internal Server Error' });
+    }
+};
+
+module.exports = {
     updateInvitationActive,
     updateInvitationData,
     updateInvitationCredits,
     AddNewOwner,
-    RemoveOwnerByIndex
-
-
+    RemoveOwnerByIndex,
+    createInvitationFromPreview,
+    setPlan,
 };

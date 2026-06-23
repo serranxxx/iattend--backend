@@ -19,6 +19,7 @@ dbConnection();
 const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:3001',
+    'http://localhost:5173',
     'https://www.iattend.mx',
     'https://www.iattend.site',
     'https://www.iattend.events',
@@ -92,6 +93,7 @@ app.use('/api/invitation', require('./router/invitation'));
 app.use("/api/payment", require("./controllers/payment"));
 app.use('/api/webhook', require('./router/webhook'));
 app.use('/api/wallet', require('./router/wallet'));
+app.use('/api/photos', require('./router/photos'));
 
 
 // Escuchar peticiones

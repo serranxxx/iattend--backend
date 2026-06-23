@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 const Stripe = require("stripe");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
-const { createInvitationWithPlan } = require("./supabase");
+const { createInvitationWithPlan, createCheckoutQueue } = require("./supabase");
+const { PLAN_PRICES } = require("../config/stripe.products");
 
 /**
  * Crear sesión de Checkout
@@ -61,12 +62,6 @@ router.post("/create-checkout-invitation", async (req, res) => {
       return res.status(400).json({ error: "priceId e invitation son requeridos" });
     }
 
-    const PLAN_PRICES = [
-      "price_1SkRwZAAdNlITNVbEsPlYN0F", // lite
-      "price_1SkRxCAAdNlITNVbB0AB16LN", // pro
-      "price_1TO1kjAAdNlITNVbmfuaY1nm" // pro-test
-    ];
-
     if (!PLAN_PRICES.includes(priceId)) {
       return res.status(400).json({ error: "priceId no válido para un plan" });
     }
@@ -107,11 +102,6 @@ router.post("/create-checkout-plan", async (req, res) => {
       return res.status(400).json({ error: "userId y priceId son requeridos" });
     }
 
-    const PLAN_PRICES = [
-      "price_1SkRwZAAdNlITNVbEsPlYN0F", // lite
-      "price_1SkRxCAAdNlITNVbB0AB16LN", // pro
-    ];
-
     if (!PLAN_PRICES.includes(priceId)) {
       return res.status(400).json({ error: "priceId no válido para un plan" });
     }
@@ -136,6 +126,45 @@ router.post("/create-checkout-plan", async (req, res) => {
 
   } catch (error) {
     console.error("❌ Error creando checkout de plan:", error.message);
+    return res.status(500).json({ error: "Error creando checkout" });
+  }
+});
+
+router.post("/create-checkout-preview", async (req, res) => {
+  try {
+    const { userId, userEmail, priceId, previewData, successUrl, cancelUrl } = req.body;
+
+    if (!userId || !priceId) {
+      return res.status(400).json({ error: "userId y priceId son requeridos" });
+    }
+
+    if (!PLAN_PRICES.includes(priceId)) {
+      return res.status(400).json({ error: "priceId no válido para un plan" });
+    }
+
+    const queueId = await createCheckoutQueue(userId, userEmail, previewData);
+    if (!queueId) {
+      return res.status(500).json({ error: "Error preparando el checkout" });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      mode: "payment",
+      line_items: [{ price: priceId, quantity: 1 }],
+      metadata: {
+        queueId,
+        userId,
+        userEmail: userEmail || "",
+        priceId,
+      },
+      success_url: successUrl || "https://www.iattend.site/invitations?welcome=1",
+      cancel_url: cancelUrl || "https://www.iattend.site/preview-mood",
+    });
+
+    return res.status(200).json({ url: session.url });
+
+  } catch (error) {
+    console.error("❌ Error creando checkout preview:", error.message);
     return res.status(500).json({ error: "Error creando checkout" });
   }
 });

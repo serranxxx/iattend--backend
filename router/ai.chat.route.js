@@ -1355,4 +1355,92 @@ router.post('/chat/action-feedback', async (req, res) => {
   }
 })
 
+// ------------------------------------------------------------
+// POST /api/ai/guest-chat — Chat público para invitados
+// Solo info pública del evento. Sin créditos ni tools admin.
+// ------------------------------------------------------------
+
+const GUEST_TOOLS = [
+  {
+    name: 'get_event_details',
+    description: 'Obtiene los detalles públicos del evento: itinerario, horarios, ubicaciones con links de Maps, dress code, avisos, hoteles sugeridos y mesa de regalos.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+]
+
+const buildGuestSystemPrompt = (guestName) => `
+Eres Lia, la asistente de invitados del evento. Eres cálida, amigable y concisa.
+Hablas en español con un tono cercano pero profesional.
+${guestName ? `El invitado se llama ${guestName}.` : ''}
+
+INFORMACIÓN QUE PUEDES COMPARTIR:
+- Horarios e itinerario del evento
+- Ubicaciones y cómo llegar (incluye links de Maps cuando los haya)
+- Dress code / vestimenta recomendada
+- Mesa de regalos o sugerencias de regalo
+- Avisos generales para los invitados
+- Hoteles sugeridos y opciones de alojamiento cercanas
+- Quiénes son los novios y personas importantes del evento
+
+INFORMACIÓN QUE NO DEBES COMPARTIR NUNCA:
+- Lista de invitados ni si alguien confirmó o no
+- Acomodo de mesas o asignación de lugares
+- Mensajes privados ni conversaciones
+- Información de contacto de otros invitados
+- Detalles operativos internos del organizador
+
+Si te preguntan algo que no puedes responder, redirige amablemente hacia lo que sí puedes ayudar.
+Usa get_event_details cuando necesites información del evento. Sé breve y útil.
+`
+
+router.post('/guest-chat', async (req, res) => {
+  const { invitation_id, message, guest_name, conversation_history } = req.body
+
+  if (!invitation_id || !message) {
+    return res.status(400).json({ success: false, error: 'invitation_id y message son requeridos' })
+  }
+
+  const historyMessages = (conversation_history || []).map(m => ({
+    role: m.role,
+    content: m.content,
+  }))
+
+  const systemPrompt = buildGuestSystemPrompt(guest_name)
+  const currentMessages = [...historyMessages, { role: 'user', content: message }]
+
+  res.setHeader('Content-Type',                'text/event-stream')
+  res.setHeader('Cache-Control',               'no-cache')
+  res.setHeader('Connection',                  'keep-alive')
+  res.setHeader('Access-Control-Allow-Origin', '*')
+
+  try {
+    const result = await runSonnetStreamLoop(
+      systemPrompt,
+      currentMessages,
+      GUEST_TOOLS,
+      async (toolName, toolInput, invId) => {
+        if (toolName !== 'get_event_details') throw new Error(`Tool no permitida: ${toolName}`)
+        res.write(`data: ${JSON.stringify({ type: 'tool_start', tool: toolName })}\n\n`)
+        const { data, error } = await supabase.rpc('get_event_details', { p_invitation_id: invId })
+        if (error) throw error
+        res.write(`data: ${JSON.stringify({ type: 'tool_end', tool: toolName })}\n\n`)
+        return data
+      },
+      invitation_id,
+      res
+    )
+
+    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+    res.end()
+  } catch (err) {
+    console.error('[guest-chat] error:', err.message)
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: err.message })
+    } else {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`)
+      res.end()
+    }
+  }
+})
+
 module.exports = router
