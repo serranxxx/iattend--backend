@@ -1,5 +1,5 @@
 const { Router } = require('express');
-const { updateInvitationActive, updateInvitationCredits, updateInvitationData, AddNewOwner, RemoveOwnerByIndex, createInvitationFromPreview, setPlan } = require('../controllers/invitation');
+const { updateInvitationActive, updateInvitationCredits, updateInvitationData, updateInvitationFields, AddNewOwner, RemoveOwnerByIndex, createInvitationFromPreview, setPlan } = require('../controllers/invitation');
 const { createInvitationWithPlan } = require('../controllers/supabase');
 const supabase = require('../config/supabase');
 
@@ -11,6 +11,7 @@ router.patch('/set-plan', setPlan);
 router.patch('/update-active', updateInvitationActive);
 router.patch('/update-credits', updateInvitationCredits);
 router.patch('/update-data', updateInvitationData);
+router.patch('/update-fields', updateInvitationFields);
 router.patch('/add-owner', AddNewOwner);
 router.patch('/remove-owner', RemoveOwnerByIndex);
 

@@ -91,6 +91,52 @@ const updateInvitationData = async (req, res = response) => {
 };
 
 
+const updateInvitationFields = async (req, res = response) => {
+    const { id, name, label, phone_number, owners, url_image } = req.body;
+
+    if (!id) {
+        return res.status(400).json({ ok: false, msg: 'id es requerido' });
+    }
+
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (label !== undefined) updates.label = label;
+    if (phone_number !== undefined) updates.phone_number = phone_number;
+    if (owners !== undefined) updates.owners = owners;
+    if (url_image !== undefined) updates.url_image = url_image;
+
+    if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ ok: false, msg: 'No hay campos para actualizar' });
+    }
+
+    try {
+
+        const { error } = await supabase
+            .from('invitations')
+            .update(updates)
+            .eq('id', id);
+
+        if (error) {
+            return res.status(400).json({
+                ok: false,
+                msg: error.message
+            });
+        }
+
+        res.status(200).json({
+            ok: true,
+            msg: 'Invitation fields updated successfully'
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            ok: false,
+            msg: error.message || 'Internal Server Error'
+        });
+    }
+};
+
+
 const AddNewOwner = async (req, res = response) => {
     const { id, name } = req.body;
   
@@ -281,6 +327,7 @@ module.exports = {
     updateInvitationActive,
     updateInvitationData,
     updateInvitationCredits,
+    updateInvitationFields,
     AddNewOwner,
     RemoveOwnerByIndex,
     createInvitationFromPreview,
