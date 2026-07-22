@@ -20,6 +20,10 @@ const dbConnection = async () => {
 
 }
 
+mongoose.connection.on('error', (error) => {
+    console.error('Error en la conexión de MongoDB:', error);
+});
+
 module.exports = {
     dbConnection
 }

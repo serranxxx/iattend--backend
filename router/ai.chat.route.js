@@ -1,6 +1,6 @@
 // routes/ai.chat.route.js
 // ============================================================
-// Fase 5 — Agente Luma con streaming + alertas proactivas
+// Fase 5 — Agente Lia con streaming + alertas proactivas
 // ============================================================
 console.log('>>> AI.CHAT.ROUTE CARGADO — versión con logs en executeTool')
 
@@ -17,7 +17,7 @@ const { orchestrate, classifyIntent, runGeminiLoop, runGPTLoop } = require('../m
 const { runSonnetStreamLoop } = require('../models/sonnet.stream.loop')
 
 // ------------------------------------------------------------
-// SYSTEM PROMPT — Personalidad de Luma
+// SYSTEM PROMPT — Personalidad de Lia
 // ------------------------------------------------------------
 
 const buildSystemPrompt = (eventSummary) => {
@@ -205,10 +205,10 @@ IMPORTANTE: Si la petición involucra UN solo invitado, procede normalmente — 
 }
 
 // ------------------------------------------------------------
-// TOOLS disponibles para Luma
+// TOOLS disponibles para Lia
 // ------------------------------------------------------------
 
-const LUMA_TOOLS = [
+const LIA_TOOLS = [
   {
     name: 'get_event_summary',
     description: 'Obtiene resumen completo del evento: conteos de invitados por estado, distribución por lado, mesas y créditos.',
@@ -866,7 +866,7 @@ router.post('/chat', async (req, res) => {
     const { data: eventSummary } = await supabase
       .rpc('get_event_summary', { p_invitation_id: invitation_id })
 
-    // Detectar qué está esperando Luma en base al último mensaje del assistant
+    // Detectar qué está esperando Lia en base al último mensaje del assistant
     const lastAssistantMsg = historyMessages
       .filter((m) => m.role === 'assistant')
       .at(-1)?.content || ''
@@ -939,8 +939,8 @@ NO preguntes nada más — ejecuta la tool ahora.
     ]
 
     const cachedSystem = [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
-    const toolsWithCache = LUMA_TOOLS.map((tool, i) =>
-      i === LUMA_TOOLS.length - 1 ? { ...tool, cache_control: { type: 'ephemeral' } } : tool
+    const toolsWithCache = LIA_TOOLS.map((tool, i) =>
+      i === LIA_TOOLS.length - 1 ? { ...tool, cache_control: { type: 'ephemeral' } } : tool
     )
 
     // ---- STREAMING ----
@@ -995,15 +995,15 @@ NO preguntes nada más — ejecuta la tool ahora.
 
         try {
           if (intent === 'CONSULTA_SIMPLE') {
-            result = await runGeminiLoop(systemPrompt, currentMessages, LUMA_TOOLS, executeToolWithTracking, invitation_id)
+            result = await runGeminiLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id)
           } else if (intent === 'ACCION') {
-            result = await runGPTLoop(systemPrompt, currentMessages, LUMA_TOOLS, executeToolWithTracking, invitation_id)
+            result = await runGPTLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id)
           } else {
-            result = await runSonnetStreamLoop(systemPrompt, currentMessages, LUMA_TOOLS, executeToolWithTracking, invitation_id, res)
+            result = await runSonnetStreamLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id, res)
           }
         } catch (err) {
           console.error(`[chat/stream] ${intent} falló, escalando a Sonnet:`, err.message)
-          result = await runSonnetStreamLoop(systemPrompt, currentMessages, LUMA_TOOLS, executeToolWithTracking, invitation_id, res)
+          result = await runSonnetStreamLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id, res)
         }
 
         fullContent    = result.content
@@ -1102,7 +1102,7 @@ NO preguntes nada más — ejecuta la tool ahora.
       userMessage:  message,
       history:      historyMessages,
       systemPrompt,
-      tools:        LUMA_TOOLS,
+      tools:        LIA_TOOLS,
       executeTool,
     })
 

@@ -283,6 +283,7 @@ const createUser = async (req, res = response) => {
             email: Email,
             password: Password,
             email_confirm: true,
+            user_metadata: { full_name: Name },
         });
 
 
@@ -296,11 +297,11 @@ const createUser = async (req, res = response) => {
         // 3️⃣ Crear registro en tabla profiles
         const { error: profileError } = await supabase
             .from('profiles')
-            .insert({
+            .upsert({
                 user_id: data.user.id,
                 full_name: Name,
                 user_email: Email,
-            });
+            }, { onConflict: 'user_id' });
 
         if (profileError) {
             return res.status(400).json({

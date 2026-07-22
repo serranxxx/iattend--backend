@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "iattend-backend-dev",
+      "runtimeExecutable": "/Users/albserranog/.nvm/versions/node/v24.1.0/bin/node",
+      "runtimeArgs": ["index.js"],
+      "port": 4000
+    },
+    {
+      "name": "iattend-vite-dev",
+      "runtimeExecutable": "/Users/albserranog/.nvm/versions/node/v24.1.0/bin/node",
+      "runtimeArgs": ["/Users/albserranog/Documents/I attend/Projects/iattend-vite/node_modules/.bin/vite", "--port", "3050", "/Users/albserranog/Documents/I attend/Projects/iattend-vite"],
+      "port": 3050
+    }
+  ]
+}

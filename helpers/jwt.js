@@ -21,6 +21,27 @@ const generarJWT = (uid, name) => {
     })
 }
 
+const generarVendedorJWT = (vendedorId, tipo) => {
+
+    return new Promise((resolve, reject) => {
+
+        const payload = { vendedorId, tipo };
+
+        jwt.sign(payload, process.env.SECRET_JWT_SEED, {
+            expiresIn: '24h'
+        }, (err, token) => {
+
+            if (err) {
+                console.log(err);
+                reject('No se pudo generar el token');
+            }
+
+            resolve(token);
+
+        })
+    })
+}
+
 const getIdUserByToken = (req) => {
 
     const token = req.header('token');
@@ -45,6 +66,7 @@ const getIdUserByToken = (req) => {
 
 module.exports = {
     generarJWT,
+    generarVendedorJWT,
     getIdUserByToken
 }
 

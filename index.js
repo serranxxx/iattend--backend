@@ -8,6 +8,15 @@ const Stripe = require("stripe");
 const { processingPayment } = require('./controllers/supabase');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
+process.on('unhandledRejection', (reason) => {
+    console.error('Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+    process.exit(1);
+});
+
 // Crear el servidor de express
 const app = express();
 app.use(nocache());
@@ -20,6 +29,7 @@ const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:5173',
+    'http://localhost:3050',
     'https://www.iattend.mx',
     'https://www.iattend.site',
     'https://www.iattend.events',
@@ -36,7 +46,7 @@ const corsOptions = {
         }
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'token'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'token', 'vendor-token'],
 };
 
 app.use(cors(corsOptions));
@@ -81,10 +91,6 @@ app.use(express.urlencoded({ extended: false }));
 
 // Rutas
 app.use('/api/auth', require('./router/auth'));
-app.use('/api/inv', require('./router/wedInvitation'));
-app.use('/api/rsvp', require('./router/rsvp'));
-app.use('/api/tags', require('./router/taginvitation'));
-app.use('/api/guests', require('./router/guests'));
 app.use('/api/ai', require('./router/iattendai'));
 app.use('/api/ai', require('./router/ai.chat.route'));
 app.use('/api/mail', require('./router/mailer'));
@@ -94,6 +100,12 @@ app.use("/api/payment", require("./controllers/payment"));
 app.use('/api/webhook', require('./router/webhook'));
 app.use('/api/wallet', require('./router/wallet'));
 app.use('/api/photos', require('./router/photos'));
+app.use('/api/guests/import', require('./router/guestImport'));
+app.use('/api/vendedores', require('./router/vendedores'));
+app.use('/api/ventas', require('./router/ventas'));
+app.use('/api/pagos', require('./router/pagos'));
+app.use('/api/admin', require('./router/adminVentas'));
+app.use('/api/configuracion-pagos', require('./router/configuracionPagos'));
 
 
 // Escuchar peticiones
