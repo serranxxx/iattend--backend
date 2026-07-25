@@ -1,6 +1,6 @@
 const { response } = require('express');
 const supabase = require('../config/supabase');
-const { generateSimpleId } = require('../helpers/simpleId');
+const { generateNumericPin } = require('../helpers/simpleId');
 
 const TIPOS_VENDEDOR_VALIDOS = ['interno', 'externo'];
 const PLANES_VALIDOS = ['PRO', 'Lite'];
@@ -322,7 +322,7 @@ const listarVendedores = async (req, res = response) => {
 }
 
 const crearVendedor = async (req, res = response) => {
-    const { nombre, tipo, telefono, email, descuento_max_pct } = req.body;
+    const { nombre, tipo, telefono, email, descuento_max_pct, crear_cuenta } = req.body;
 
     if (!nombre || typeof nombre !== 'string' || !nombre.trim()) {
         return res.status(400).json({ ok: false, msg: 'nombre es requerido' });
@@ -338,6 +338,12 @@ const crearVendedor = async (req, res = response) => {
         return res.status(400).json({ ok: false, msg: 'descuento_max_pct inválido' });
     }
 
+    const emailNormalizado = email ? email.trim().toLowerCase() : null;
+
+    if (crear_cuenta && !emailNormalizado) {
+        return res.status(400).json({ ok: false, msg: 'Se requiere un correo para crear la cuenta i attend' });
+    }
+
     try {
         let vendedor = null;
         let lastError = null;
@@ -349,9 +355,9 @@ const crearVendedor = async (req, res = response) => {
                     nombre: nombre.trim(),
                     tipo,
                     telefono: telefono || null,
-                    email: email || null,
+                    email: emailNormalizado,
                     descuento_max_pct: descuento,
-                    codigo_acceso: generateSimpleId().toUpperCase(),
+                    codigo_acceso: generateNumericPin(),
                 })
                 .select('id, nombre, tipo, telefono, email, descuento_max_pct, codigo_acceso, activo')
                 .single();
@@ -369,7 +375,54 @@ const crearVendedor = async (req, res = response) => {
             return res.status(500).json({ ok: false, msg: lastError?.message || 'No se pudo generar un código de acceso único' });
         }
 
-        return res.status(201).json({ vendedor });
+        let cuenta_creada = false;
+        let cuenta_error = null;
+
+        if (crear_cuenta) {
+            const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+                email: emailNormalizado,
+                password: vendedor.codigo_acceso,
+                email_confirm: true,
+                user_metadata: { full_name: nombre.trim() },
+            });
+
+            if (authError) {
+                cuenta_error = authError.message;
+            } else {
+                const perfilVendedor = {
+                    user_id: authData.user.id,
+                    full_name: nombre.trim(),
+                    user_email: emailNormalizado,
+                    role: 'sales',
+                    active: true,
+                };
+
+                const { error: profileError } = await supabase
+                    .from('profiles')
+                    .upsert(perfilVendedor, { onConflict: 'user_id' });
+
+                if (profileError) {
+                    cuenta_error = profileError.message;
+                } else {
+                    cuenta_creada = true;
+
+                    // El signup dispara un proceso async en Supabase que resincroniza
+                    // profiles desde auth.users un momento después de crear el usuario,
+                    // pisando full_name/role con sus valores por defecto. Reafirmamos
+                    // los valores correctos pasados unos segundos para ganar esa carrera.
+                    setTimeout(() => {
+                        supabase
+                            .from('profiles')
+                            .upsert(perfilVendedor, { onConflict: 'user_id' })
+                            .then(({ error }) => {
+                                if (error) console.error('Error reafirmando perfil de vendedor:', error.message);
+                            });
+                    }, 3000);
+                }
+            }
+        }
+
+        return res.status(201).json({ vendedor, cuenta_creada, cuenta_error });
 
     } catch (error) {
         return res.status(500).json({ ok: false, msg: error.message || 'Internal Server Error' });

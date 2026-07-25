@@ -7,7 +7,7 @@ const router = express.Router();
 
 const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 1 * 1024 * 1024 }, // 1MB
+    limits: { fileSize: 3 * 1024 * 1024 }, // 3MB
 });
 
 // POST /api/photos/upload

@@ -2,7 +2,7 @@ const { response } = require('express');
 const supabase = require('../config/supabase');
 const { generarVendedorJWT } = require('../helpers/jwt');
 
-const CODIGO_ACCESO_REGEX = /^[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/;
+const CODIGO_ACCESO_REGEX = /^\d{6}$/;
 
 const loginVendedor = async (req, res = response) => {
     const { codigo_acceso } = req.body;
@@ -15,7 +15,7 @@ const loginVendedor = async (req, res = response) => {
         const { data: vendedor, error } = await supabase
             .from('vendedores')
             .select('id, nombre, tipo, activo, descuento_max_pct')
-            .eq('codigo_acceso', codigo_acceso.toUpperCase())
+            .eq('codigo_acceso', codigo_acceso)
             .maybeSingle();
 
         if (error) {
