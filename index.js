@@ -105,6 +105,7 @@ app.use('/api/vendedores', require('./router/vendedores'));
 app.use('/api/ventas', require('./router/ventas'));
 app.use('/api/pagos', require('./router/pagos'));
 app.use('/api/admin', require('./router/adminVentas'));
+app.use('/api/admin', require('./router/adminFonts'));
 app.use('/api/configuracion-pagos', require('./router/configuracionPagos'));
 
 
