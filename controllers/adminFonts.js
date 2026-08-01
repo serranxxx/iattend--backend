@@ -12,11 +12,9 @@ const GOOGLE_FONTS_CACHE_TTL_MS = 60 * 60 * 1000;
 let _googleFontsCache = { data: null, ts: 0 };
 
 const buscarGoogleFonts = async (req, res = response) => {
-    const { q } = req.query;
-
-    if (!q || String(q).trim().length < 2) {
-        return res.status(200).json({ fonts: [] });
-    }
+    const { q, category } = req.query;
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 20, 1), 100);
 
     try {
         const now = Date.now();
@@ -25,16 +23,27 @@ const buscarGoogleFonts = async (req, res = response) => {
             const text = await googleRes.text();
             const cleaned = text.replace(/^\)\]\}'/, '');
             const parsed = JSON.parse(cleaned);
-            _googleFontsCache = { data: parsed.familyMetadataList || [], ts: now };
+            const list = (parsed.familyMetadataList || [])
+                .map(f => ({ family: f.family, category: f.category || null }))
+                .sort((a, b) => a.family.localeCompare(b.family));
+            _googleFontsCache = { data: list, ts: now };
         }
 
-        const term = String(q).trim().toLowerCase();
-        const results = _googleFontsCache.data
-            .filter(f => f.family?.toLowerCase().includes(term))
-            .slice(0, 20)
-            .map(f => ({ family: f.family, category: f.category || null }));
+        const term = String(q || '').trim().toLowerCase();
+        const categories = String(category || '')
+            .split(',')
+            .map(c => c.trim())
+            .filter(Boolean);
 
-        return res.status(200).json({ fonts: results });
+        const filtered = _googleFontsCache.data
+            .filter(f => term.length < 2 || f.family?.toLowerCase().includes(term))
+            .filter(f => categories.length === 0 || categories.includes(f.category));
+
+        const total = filtered.length;
+        const start = (page - 1) * pageSize;
+        const fonts = filtered.slice(start, start + pageSize);
+
+        return res.status(200).json({ fonts, total, page, pageSize });
 
     } catch (error) {
         return res.status(500).json({ ok: false, msg: error.message || 'Internal Server Error' });
