@@ -89,6 +89,40 @@ const sendWhatsappTemplate = async (req, res = express.response) => {
   }
 };
 
+// Bloque Graph API reutilizable (webhook de prospectos IG lo usa directo, sin pasar por el dispatch de abajo)
+const sendWhatsappFreeTextMessage = async (to, text) => {
+  const phoneNumberId = process.env.WA_PHONE_NUMBER_ID;
+  const token = process.env.WA_ACCESS_TOKEN;
+
+  const normalizedPhone = to.startsWith('521') && to.length === 13
+    ? to.replace('521', '52')
+    : to;
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: normalizedPhone,
+    type: 'text',
+    text: {
+      preview_url: false,
+      body: text,
+    },
+  };
+
+  const { data } = await axios.post(
+    `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
+    payload,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+
+  return { data, normalizedPhone };
+};
+
 const sendWhatsappFreeText = async (req, res) => {
   try {
      const { to, text, invitation_id } = req.body;
@@ -100,34 +134,7 @@ const sendWhatsappFreeText = async (req, res) => {
       });
     }
 
-    const phoneNumberId = process.env.WA_PHONE_NUMBER_ID;
-    const token = process.env.WA_ACCESS_TOKEN;
-
-    const normalizedPhone = to.startsWith('521') && to.length === 13
-      ? to.replace('521', '52')
-      : to;
-
-    const payload = {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: normalizedPhone,
-      type: 'text',
-      text: {
-        preview_url: false,
-        body: text,
-      },
-    };
-
-    const { data } = await axios.post(
-      `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    const { data, normalizedPhone } = await sendWhatsappFreeTextMessage(to, text);
 
     const metaMessageId = data?.messages?.[0]?.id || null;
 
@@ -171,4 +178,4 @@ const sendWhatsappFreeText = async (req, res) => {
   }
 };
 
-module.exports = { sendWhatsappTemplate, sendWhatsappFreeText };
+module.exports = { sendWhatsappTemplate, sendWhatsappFreeText, sendWhatsappFreeTextMessage };

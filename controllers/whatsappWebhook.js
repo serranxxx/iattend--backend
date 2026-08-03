@@ -1,7 +1,9 @@
 const express = require('express');
 const supabase = require('../config/supabase');
+const { sendWhatsappFreeTextMessage } = require('./whatsapp');
 
 const MEDIA_TYPES_TO_DOWNLOAD = ['image', 'audio', 'document', 'sticker'];
+const INSTAGRAM_URL_REGEX = /instagram\.com\/([a-zA-Z0-9_.]+)/i;
 
 // ── Verificación del webhook ───────────────────────────────────────────────
 
@@ -112,6 +114,71 @@ const normalizePhone = (phone) => {
   return phone;
 };
 
+const toPhoneWithPlus = (phone) => {
+  const normalized = normalizePhone(phone);
+  return normalized.startsWith('+') ? normalized : `+${normalized}`;
+};
+
+// ── Prospectos IG (webhook extendido) ─────────────────────────────────────
+
+const phoneDigits = (phone) => (phone || '').replace(/\D/g, '').slice(-10);
+
+// vendedores.telefono no tiene formato forzado en BD, así que el match es por
+// los últimos 10 dígitos en vez de comparar el string tal cual.
+const handleInstagramProspect = async (igUsername, igUrl, fromPhoneRaw) => {
+  const fromPhoneWithPlus = toPhoneWithPlus(fromPhoneRaw);
+  const fromDigits = phoneDigits(fromPhoneWithPlus);
+
+  const { data: vendedores, error: vendedoresError } = await supabase
+    .from('vendedores')
+    .select('id, telefono');
+
+  if (vendedoresError) console.error('[prospectos_ig] error buscando vendedores:', vendedoresError);
+
+  const vendedorMatch = (vendedores || []).find(
+    (v) => v.telefono && phoneDigits(v.telefono) === fromDigits
+  );
+
+  const insertPayload = vendedorMatch
+    ? {
+        instagram_username: igUsername,
+        instagram_url: igUrl,
+        estado: 'asignado',
+        vendedor_id: vendedorMatch.id,
+        asignado_at: new Date().toISOString(),
+      }
+    : {
+        instagram_username: igUsername,
+        instagram_url: igUrl,
+        estado: 'sin_asignar',
+      };
+
+  const { error: insertError } = await supabase.from('prospectos_ig').insert(insertPayload);
+
+  if (!insertError) {
+    console.log(
+      `[prospectos_ig] nuevo prospecto @${igUsername}` +
+        (vendedorMatch ? ` asignado a vendedor ${vendedorMatch.id}` : ' sin asignar')
+    );
+    return;
+  }
+
+  if (insertError.code === '23505') {
+    console.warn(`[prospectos_ig] @${igUsername} ya existe, avisando por WhatsApp a ${fromPhoneWithPlus}`);
+    try {
+      await sendWhatsappFreeTextMessage(
+        fromPhoneWithPlus,
+        'Este contacto de Instagram ya fue enviado anteriormente y ya está siendo atendido. ¡Gracias!'
+      );
+    } catch (sendError) {
+      console.error('[prospectos_ig] error avisando duplicado:', sendError?.response?.data || sendError.message);
+    }
+    return;
+  }
+
+  console.error('[prospectos_ig] error insertando prospecto:', insertError);
+};
+
 // ── Dispatch matching ─────────────────────────────────────────────────────
 
 const findMatchingDispatch = async (fromPhone, messageTimestamp) => {
@@ -219,6 +286,12 @@ const processIncomingMessages = async (messages, contacts = []) => {
   for (const message of messages) {
     const { body, mediaId, reactedToId } = extractMessageContent(message);
     const messageTimestamp = new Date(Number(message.timestamp) * 1000).toISOString();
+
+    const igMatch = typeof body === 'string' ? body.match(INSTAGRAM_URL_REGEX) : null;
+    if (igMatch) {
+      await handleInstagramProspect(igMatch[1], body, message.from);
+      continue; // no se guarda como whatsapp_incoming_messages ni sigue el flujo conversacional normal
+    }
 
     // Descargar y subir a storage solo los tipos que no son video
     let mediaUrl = null;
