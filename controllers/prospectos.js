@@ -4,7 +4,6 @@ const supabase = require('../config/supabase');
 const ESTADOS_VALIDOS = [
     'sin_asignar',
     'asignado',
-    'mensaje_enviado',
     'en_conversacion',
     'finalizado',
     'volver_a_contactar',
@@ -101,6 +100,10 @@ const actualizarEstado = async (req, res = response) => {
         return res.status(400).json({ ok: false, msg: 'motivo_finalizado es requerido para finalizar un prospecto' });
     }
 
+    if (!req.isAdmin && estado === 'sin_asignar') {
+        return res.status(403).json({ ok: false, msg: 'No puedes desasignarte un prospecto' });
+    }
+
     try {
         if (!req.isAdmin) {
             const { data: existente, error: existenteError } = await supabase
@@ -140,9 +143,11 @@ const actualizarEstado = async (req, res = response) => {
     }
 };
 
-const actualizarNotas = async (req, res = response) => {
+// notas y favorito son ediciones libres del vendedor/admin sobre su propio prospecto —
+// ninguna de las dos toca vendedor_id, así que comparten la misma validación de pertenencia.
+const actualizarDetalles = async (req, res = response) => {
     const { id } = req.params;
-    const { notas } = req.body;
+    const { notas, favorito } = req.body;
 
     try {
         if (!req.isAdmin) {
@@ -161,9 +166,13 @@ const actualizarNotas = async (req, res = response) => {
             }
         }
 
+        const updatePayload = { updated_at: new Date().toISOString() };
+        if (notas !== undefined) updatePayload.notas = notas ?? null;
+        if (favorito !== undefined) updatePayload.favorito = !!favorito;
+
         const { data, error } = await supabase
             .from('prospectos_ig')
-            .update({ notas: notas ?? null, updated_at: new Date().toISOString() })
+            .update(updatePayload)
             .eq('id', id)
             .select()
             .single();
@@ -183,5 +192,5 @@ module.exports = {
     misProspectos,
     asignarVendedor,
     actualizarEstado,
-    actualizarNotas,
+    actualizarDetalles,
 };

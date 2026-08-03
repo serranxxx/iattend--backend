@@ -10,7 +10,7 @@ const {
     misProspectos,
     asignarVendedor,
     actualizarEstado,
-    actualizarNotas,
+    actualizarDetalles,
 } = require('../controllers/prospectos');
 
 const router = Router();
@@ -21,6 +21,6 @@ router.get('/', listarProspectos);
 router.get('/mis-prospectos', misProspectos);
 router.patch('/:id/asignar', asignarVendedor);
 router.patch('/:id/estado', actualizarEstado);
-router.patch('/:id', actualizarNotas);
+router.patch('/:id', actualizarDetalles);
 
 module.exports = router;

@@ -123,21 +123,30 @@ const toPhoneWithPlus = (phone) => {
 
 const phoneDigits = (phone) => (phone || '').replace(/\D/g, '').slice(-10);
 
+// Alberto reenvía perfiles de Instagram encontrados por su cuenta desde su propio WhatsApp
+// (también tiene fila en `vendedores` para otros fines) — esos envíos nunca deben
+// auto-asignársele a él mismo, siempre deben quedar en sin_asignar para que el admin los triage.
+const ALBERTO_PHONE_DIGITS = phoneDigits('+526145394836');
+
 // vendedores.telefono no tiene formato forzado en BD, así que el match es por
 // los últimos 10 dígitos en vez de comparar el string tal cual.
 const handleInstagramProspect = async (igUsername, igUrl, fromPhoneRaw) => {
   const fromPhoneWithPlus = toPhoneWithPlus(fromPhoneRaw);
   const fromDigits = phoneDigits(fromPhoneWithPlus);
 
-  const { data: vendedores, error: vendedoresError } = await supabase
-    .from('vendedores')
-    .select('id, telefono');
+  let vendedorMatch = null;
 
-  if (vendedoresError) console.error('[prospectos_ig] error buscando vendedores:', vendedoresError);
+  if (fromDigits !== ALBERTO_PHONE_DIGITS) {
+    const { data: vendedores, error: vendedoresError } = await supabase
+      .from('vendedores')
+      .select('id, telefono');
 
-  const vendedorMatch = (vendedores || []).find(
-    (v) => v.telefono && phoneDigits(v.telefono) === fromDigits
-  );
+    if (vendedoresError) console.error('[prospectos_ig] error buscando vendedores:', vendedoresError);
+
+    vendedorMatch = (vendedores || []).find(
+      (v) => v.telefono && phoneDigits(v.telefono) === fromDigits
+    );
+  }
 
   const insertPayload = vendedorMatch
     ? {

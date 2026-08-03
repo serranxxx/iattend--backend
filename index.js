@@ -109,6 +109,8 @@ app.use('/api/admin', require('./router/adminVentas'));
 app.use('/api/admin', require('./router/adminFonts'));
 app.use('/api/configuracion-pagos', require('./router/configuracionPagos'));
 
+const { iniciarReglaVolverAContactar } = require('./helpers/prospectosScheduler');
+iniciarReglaVolverAContactar();
 
 // Escuchar peticiones
 app.listen(process.env.PORT, () => {
