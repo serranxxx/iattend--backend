@@ -1,5 +1,10 @@
 const { response } = require('express');
 const supabase = require('../config/supabase');
+const { sendMail } = require('./mailer');
+const { activationRequestEmailTemplate } = require('./templates/activationRequestEmail');
+const { prospectAssignedEmailTemplate } = require('./templates/prospectAssignedEmail');
+
+const ADMIN_NOTIFICATION_EMAIL = 'albserrano8@gmail.com';
 
 const ESTADOS_VALIDOS = [
     'sin_asignar',
@@ -59,7 +64,7 @@ const asignarVendedor = async (req, res = response) => {
     }
 
     const { id } = req.params;
-    const { vendedor_id } = req.body;
+    const { vendedor_id, notificar } = req.body;
 
     if (!vendedor_id) {
         return res.status(400).json({ ok: false, msg: 'vendedor_id es requerido' });
@@ -80,6 +85,28 @@ const asignarVendedor = async (req, res = response) => {
 
         if (error) {
             return res.status(500).json({ ok: false, msg: error.message });
+        }
+
+        if (notificar) {
+            const { data: vendedor, error: vendedorError } = await supabase
+                .from('vendedores')
+                .select('nombre, email')
+                .eq('id', vendedor_id)
+                .maybeSingle();
+
+            if (vendedorError) {
+                console.error('[prospectos_ig] error buscando vendedor para notificar:', vendedorError);
+            } else if (vendedor?.email) {
+                try {
+                    const html = prospectAssignedEmailTemplate({
+                        vendedorNombre: vendedor.nombre,
+                        username: data.instagram_username,
+                    });
+                    await sendMail(vendedor.email, 'Nuevo prospecto de Instagram asignado', html);
+                } catch (mailError) {
+                    console.error('[prospectos_ig] error enviando correo de asignación:', mailError);
+                }
+            }
         }
 
         return res.status(200).json({ prospecto: data });
@@ -143,11 +170,12 @@ const actualizarEstado = async (req, res = response) => {
     }
 };
 
-// notas y favorito son ediciones libres del vendedor/admin sobre su propio prospecto —
-// ninguna de las dos toca vendedor_id, así que comparten la misma validación de pertenencia.
+// notas, favorito, email, teléfono, post_contexto y nivel_interes son ediciones libres del
+// vendedor/admin sobre su propio prospecto — ninguna toca vendedor_id, comparten la misma
+// validación de pertenencia.
 const actualizarDetalles = async (req, res = response) => {
     const { id } = req.params;
-    const { notas, favorito } = req.body;
+    const { notas, favorito, email, telefono, post_contexto, nivel_interes } = req.body;
 
     try {
         if (!req.isAdmin) {
@@ -169,6 +197,10 @@ const actualizarDetalles = async (req, res = response) => {
         const updatePayload = { updated_at: new Date().toISOString() };
         if (notas !== undefined) updatePayload.notas = notas ?? null;
         if (favorito !== undefined) updatePayload.favorito = !!favorito;
+        if (email !== undefined) updatePayload.email = email ?? null;
+        if (telefono !== undefined) updatePayload.telefono = telefono ?? null;
+        if (post_contexto !== undefined) updatePayload.post_contexto = Array.isArray(post_contexto) ? post_contexto : [];
+        if (nivel_interes !== undefined) updatePayload.nivel_interes = nivel_interes ?? null;
 
         const { data, error } = await supabase
             .from('prospectos_ig')
@@ -187,10 +219,62 @@ const actualizarDetalles = async (req, res = response) => {
     }
 };
 
+// Solo tiene sentido mientras el prospecto está 'asignado' y aún no arrancó la conversación —
+// el vendedor no tiene acceso directo a Instagram, así que le pide a Alberto por correo.
+const solicitarActivacion = async (req, res = response) => {
+    if (!req.vendedorId) {
+        return res.status(403).json({ ok: false, msg: 'Esta acción es solo para vendedores' });
+    }
+
+    const { id } = req.params;
+
+    try {
+        const { data: prospecto, error: prospectoError } = await supabase
+            .from('prospectos_ig')
+            .select('instagram_username, estado, vendedor_id')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (prospectoError) {
+            return res.status(500).json({ ok: false, msg: prospectoError.message });
+        }
+
+        if (!prospecto || prospecto.vendedor_id !== req.vendedorId) {
+            return res.status(403).json({ ok: false, msg: 'Este prospecto no te pertenece' });
+        }
+
+        if (prospecto.estado !== 'asignado') {
+            return res.status(400).json({ ok: false, msg: 'Solo se puede solicitar activación mientras está asignado' });
+        }
+
+        const { data: vendedor, error: vendedorError } = await supabase
+            .from('vendedores')
+            .select('nombre')
+            .eq('id', req.vendedorId)
+            .maybeSingle();
+
+        if (vendedorError) {
+            return res.status(500).json({ ok: false, msg: vendedorError.message });
+        }
+
+        const html = activationRequestEmailTemplate({
+            vendedorNombre: vendedor?.nombre || 'Un vendedor',
+            username: prospecto.instagram_username,
+        });
+
+        await sendMail(ADMIN_NOTIFICATION_EMAIL, `${vendedor?.nombre || 'Un vendedor'} solicita activar @${prospecto.instagram_username}`, html);
+
+        return res.status(200).json({ ok: true });
+    } catch (error) {
+        return res.status(500).json({ ok: false, msg: error.message || 'Internal Server Error' });
+    }
+};
+
 module.exports = {
     listarProspectos,
     misProspectos,
     asignarVendedor,
     actualizarEstado,
     actualizarDetalles,
+    solicitarActivacion,
 };

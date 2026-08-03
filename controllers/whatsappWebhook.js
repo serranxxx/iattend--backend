@@ -3,7 +3,8 @@ const supabase = require('../config/supabase');
 const { sendWhatsappFreeTextMessage } = require('./whatsapp');
 
 const MEDIA_TYPES_TO_DOWNLOAD = ['image', 'audio', 'document', 'sticker'];
-const INSTAGRAM_URL_REGEX = /instagram\.com\/([a-zA-Z0-9_.]+)/i;
+// El mensaje completo (trim) debe ser únicamente el link — no basta con que lo contenga.
+const INSTAGRAM_SOLO_URL_REGEX = /^https?:\/\/(www\.)?instagram\.com\/([a-zA-Z0-9_.]+)\/?(\?[^\s]*)?$/i;
 
 // ── Verificación del webhook ───────────────────────────────────────────────
 
@@ -130,30 +131,36 @@ const ALBERTO_PHONE_DIGITS = phoneDigits('+526145394836');
 
 // vendedores.telefono no tiene formato forzado en BD, así que el match es por
 // los últimos 10 dígitos en vez de comparar el string tal cual.
-const handleInstagramProspect = async (igUsername, igUrl, fromPhoneRaw) => {
+const buscarVendedorPorTelefono = async (fromPhoneWithPlus) => {
+  const fromDigits = phoneDigits(fromPhoneWithPlus);
+
+  const { data: vendedores, error: vendedoresError } = await supabase
+    .from('vendedores')
+    .select('id, telefono');
+
+  if (vendedoresError) {
+    console.error('[prospectos_ig] error buscando vendedores:', vendedoresError);
+    return null;
+  }
+
+  return (vendedores || []).find((v) => v.telefono && phoneDigits(v.telefono) === fromDigits) || null;
+};
+
+// `vendedorSender` ya viene resuelto por el caller (se reutiliza también para decidir si el
+// mensaje se excluye de whatsapp_incoming_messages) — aquí solo se usa para decidir a quién asignar,
+// excluyendo a Alberto de auto-asignársele a sí mismo.
+const handleInstagramProspect = async (igUsername, igUrl, fromPhoneRaw, vendedorSender) => {
   const fromPhoneWithPlus = toPhoneWithPlus(fromPhoneRaw);
   const fromDigits = phoneDigits(fromPhoneWithPlus);
 
-  let vendedorMatch = null;
+  const vendedorParaAsignar = fromDigits !== ALBERTO_PHONE_DIGITS ? vendedorSender : null;
 
-  if (fromDigits !== ALBERTO_PHONE_DIGITS) {
-    const { data: vendedores, error: vendedoresError } = await supabase
-      .from('vendedores')
-      .select('id, telefono');
-
-    if (vendedoresError) console.error('[prospectos_ig] error buscando vendedores:', vendedoresError);
-
-    vendedorMatch = (vendedores || []).find(
-      (v) => v.telefono && phoneDigits(v.telefono) === fromDigits
-    );
-  }
-
-  const insertPayload = vendedorMatch
+  const insertPayload = vendedorParaAsignar
     ? {
         instagram_username: igUsername,
         instagram_url: igUrl,
         estado: 'asignado',
-        vendedor_id: vendedorMatch.id,
+        vendedor_id: vendedorParaAsignar.id,
         asignado_at: new Date().toISOString(),
       }
     : {
@@ -167,7 +174,7 @@ const handleInstagramProspect = async (igUsername, igUrl, fromPhoneRaw) => {
   if (!insertError) {
     console.log(
       `[prospectos_ig] nuevo prospecto @${igUsername}` +
-        (vendedorMatch ? ` asignado a vendedor ${vendedorMatch.id}` : ' sin asignar')
+        (vendedorParaAsignar ? ` asignado a vendedor ${vendedorParaAsignar.id}` : ' sin asignar')
     );
     return;
   }
@@ -296,10 +303,17 @@ const processIncomingMessages = async (messages, contacts = []) => {
     const { body, mediaId, reactedToId } = extractMessageContent(message);
     const messageTimestamp = new Date(Number(message.timestamp) * 1000).toISOString();
 
-    const igMatch = typeof body === 'string' ? body.match(INSTAGRAM_URL_REGEX) : null;
-    if (igMatch) {
-      await handleInstagramProspect(igMatch[1], body, message.from);
-      continue; // no se guarda como whatsapp_incoming_messages ni sigue el flujo conversacional normal
+    const soloUrlMatch = typeof body === 'string' ? body.trim().match(INSTAGRAM_SOLO_URL_REGEX) : null;
+    if (soloUrlMatch) {
+      const igUsername = soloUrlMatch[2];
+      const fromPhoneWithPlus = toPhoneWithPlus(message.from);
+      const vendedorSender = await buscarVendedorPorTelefono(fromPhoneWithPlus);
+      await handleInstagramProspect(igUsername, body.trim(), message.from, vendedorSender);
+
+      if (vendedorSender) {
+        continue; // ambas condiciones (vendedor + link solitario) → no se guarda como whatsapp_incoming_messages
+      }
+      // si no es vendedor, el prospecto ya se creó (sin_asignar) pero el mensaje sigue el flujo normal de abajo
     }
 
     // Descargar y subir a storage solo los tipos que no son video

@@ -12,6 +12,8 @@ const moverProspectosEstancados = async () => {
         .update({ estado: 'volver_a_contactar', updated_at: new Date().toISOString() })
         .eq('estado', 'en_conversacion')
         .lt('updated_at', limite.toISOString())
+        // nivel_interes = 1 (rojo, "sin interés") nunca se mueve solo; null (sin definir) sí sigue la regla
+        .or('nivel_interes.is.null,nivel_interes.neq.1')
         .select('id');
 
     if (error) {
