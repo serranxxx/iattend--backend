@@ -105,7 +105,7 @@ index.js            registro de middlewares, CORS, montaje de rutas, arranque
 | `/api/invitation` | `router/invitation.js` | invitaciones actuales sobre Supabase: crear desde preview, planes, créditos, datos del evento |
 | `/api/ai` | `router/ai.chat.route.js`, `router/ai.credits.route.js`, `router/iattendai.js` | Lia (greeting/chat/approve/reject/feedback), consulta de créditos, generación de invitación por IA |
 | `/api/mail` | `router/mailer.js` | envío de emails transaccionales (gift, notificaciones) |
-| `/api/whats` | `router/whatsapp.js` | envío de plantillas WhatsApp y texto libre |
+| `/api/whats` | `router/whatsapp.js` | envío de plantillas WhatsApp y texto libre; `/api/whats/reminders` envía el template `reminder` (recordatorio manual, registra en `invitation_reminder_dispatches` e incrementa `guests.reminder_count`/`last_reminder_at` del principal) |
 | `/api/webhook` | `router/webhook.js` | webhook entrante de WhatsApp (verify + receive) |
 | `/api/payment` | `controllers/payment.js` | Stripe Checkout (créditos, planes, side events, preview) |
 | `/api/payment/webhook` | montado directo en `index.js` | webhook de Stripe (raw body) |

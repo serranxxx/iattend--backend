@@ -112,6 +112,10 @@ app.use('/api/configuracion-pagos', require('./router/configuracionPagos'));
 const { iniciarReglaVolverAContactar } = require('./helpers/prospectosScheduler');
 iniciarReglaVolverAContactar();
 
+// Retomar lotes de envío masivo que hayan quedado a medias por un restart
+const { resumePendingBatches } = require('./services/whatsappBulkWorker');
+resumePendingBatches();
+
 // Escuchar peticiones
 app.listen(process.env.PORT, () => {
     console.log(`Servidor corriendo en puerto ${process.env.PORT}`);

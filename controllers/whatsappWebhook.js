@@ -103,6 +103,31 @@ const processStatuses = async (statuses) => {
       .eq("meta_message_id", metaMessageId);
 
     if (freetextError) console.error("Supabase freetext status update error:", freetextError);
+
+    // Recordatorios (invitation_reminder_dispatches): mismo patrón de UPDATE
+    // ciego por meta_message_id que las dos tablas de arriba — si el id no
+    // pertenece a esta tabla, afecta 0 filas y no pasa nada. Aquí sí se
+    // persisten failed_at/error_code/error_title (Meta los manda en
+    // statusItem.errors[]), cosa que las tablas hermanas no guardan hoy.
+    const reminderPatch = {
+      status: newStatus,
+      recipient_id: recipientId,
+      raw_webhook: statusItem,
+      ...(newStatus === 'delivered' && { delivered_at: new Date().toISOString() }),
+      ...(newStatus === 'read' && { read_at: new Date().toISOString() }),
+      ...(newStatus === 'failed' && {
+        failed_at: new Date().toISOString(),
+        error_code: statusItem.errors?.[0]?.code != null ? String(statusItem.errors[0].code) : null,
+        error_title: statusItem.errors?.[0]?.title ?? null,
+      }),
+    };
+
+    const { error: reminderError } = await supabase
+      .from("invitation_reminder_dispatches")
+      .update(reminderPatch)
+      .eq("meta_message_id", metaMessageId);
+
+    if (reminderError) console.error("Supabase reminder status update error:", reminderError);
   }
 };
 
