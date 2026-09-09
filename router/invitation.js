@@ -72,7 +72,7 @@ router.post('/create-free', async (req, res) => {
     }
 
     try {
-        await createInvitationWithPlan(userId, plan, {
+        const id = await createInvitationWithPlan(userId, plan, {
             userEmail: userEmail || '',
             name,
             phoneNumber: phoneNumber || '',
@@ -80,7 +80,9 @@ router.post('/create-free', async (req, res) => {
             owners: owners ? JSON.stringify(owners) : '[]',
         });
 
-        return res.status(201).json({ ok: true, msg: 'Invitación creada' });
+        if (!id) return res.status(500).json({ ok: false, msg: 'No se pudo crear la invitación' });
+
+        return res.status(201).json({ ok: true, msg: 'Invitación creada', id });
     } catch (error) {
         return res.status(500).json({ ok: false, msg: error.message || 'Internal Server Error' });
     }

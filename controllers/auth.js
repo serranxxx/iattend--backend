@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const { generarJWT, getIdUserByToken } = require('../helpers/jwt');
 const user = require('../models/user');
 const supabase = require('../config/supabase');
+const { createInvitationWithPlan } = require('./supabase');
 
 
 
@@ -250,6 +251,68 @@ const editUser = async (req, res = response) => {
     }
 };
 
+/**
+ * Asegura que una cuenta esté completa: perfil y evento en plan free.
+ *
+ * El alta por correo hace esto en `createUser`, pero con Google/Apple el
+ * usuario nace directo en Supabase Auth y nadie le creaba ni el perfil ni el
+ * evento gratis. Es idempotente: se puede llamar en cada login sin duplicar.
+ */
+const ensureAccount = async (req, res = response) => {
+    const { userId, email, name } = req.body;
+
+    if (!userId) {
+        return res.status(400).json({ ok: false, msg: 'userId es requerido' });
+    }
+
+    try {
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('user_id, full_name, user_email, role')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        if (!profile) {
+            const { error: profileError } = await supabase
+                .from('profiles')
+                .insert({
+                    user_id: userId,
+                    full_name: name || (email ? email.split('@')[0] : 'Invitado'),
+                    user_email: email || null,
+                });
+
+            if (profileError) {
+                return res.status(400).json({ ok: false, msg: profileError.message });
+            }
+        }
+
+        // Mismo criterio que el alta por correo: un evento free por cuenta nueva
+        const { data: existing } = await supabase
+            .from('invitations')
+            .select('id')
+            .eq('user_id', userId)
+            .limit(1);
+
+        let invitationId = existing?.[0]?.id ?? null;
+        let created = false;
+
+        if (!invitationId) {
+            invitationId = await createInvitationWithPlan(userId, 'free', { userEmail: email || '' });
+            created = !!invitationId;
+        }
+
+        const { data: fresh } = await supabase
+            .from('profiles')
+            .select('full_name, user_email, role')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        return res.status(200).json({ ok: true, created, invitationId, profile: fresh ?? null });
+    } catch (error) {
+        return res.status(500).json({ ok: false, msg: error.message || 'Internal Server Error' });
+    }
+};
+
 const createUser = async (req, res = response) => {
     let { Name, Email, Password } = req.body;
 
@@ -310,6 +373,23 @@ const createUser = async (req, res = response) => {
             });
         }
 
+        // 4️⃣ Evento free (Save the Date): toda cuenta nueva nace con un evento
+        // plan 'free' con plantilla default (uno por cuenta — se omite si ya tiene).
+        // Best-effort: si falla, el alta de la cuenta no se bloquea.
+        try {
+            const { data: existing } = await supabase
+                .from('invitations')
+                .select('id')
+                .eq('user_id', data.user.id)
+                .limit(1);
+
+            if (!existing || existing.length === 0) {
+                await createInvitationWithPlan(data.user.id, 'free', { userEmail: Email });
+            }
+        } catch (freeError) {
+            console.error('Error creando evento free:', freeError);
+        }
+
         res.status(200).json({
             ok: true,
             msg: 'User uploaded',
@@ -338,5 +418,6 @@ module.exports = {
     getUserLogged,
     newUser,
     editUser,
-    createUser
+    createUser,
+    ensureAccount,
 }

@@ -100,6 +100,8 @@ app.use("/api/payment", require("./controllers/payment"));
 app.use('/api/webhook', require('./router/webhook'));
 app.use('/api/wallet', require('./router/wallet'));
 app.use('/api/photos', require('./router/photos'));
+// Limpieza de los archivos temporales del Save the Date gratis
+app.use('/api/storage', require('./router/storage'));
 app.use('/api/guests/import', require('./router/guestImport'));
 app.use('/api/vendedores', require('./router/vendedores'));
 app.use('/api/prospectos', require('./router/prospectos'));

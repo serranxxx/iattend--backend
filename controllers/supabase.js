@@ -306,11 +306,20 @@ async function createInvitationWithPlan(userId, planName, metadata = {}) {
     },
   };
 
-  const { error } = await supabase.from("invitations").insert(payload);
+  // Devuelve el id: el flujo del Save the Date gratis necesita saber a qué
+  // invitación asociar la pieza recién creada.
+  const { data, error } = await supabase
+    .from("invitations")
+    .insert(payload)
+    .select("id")
+    .single();
 
   if (error) {
     console.error("Error creando invitación con plan:", error);
+    return null;
   }
+
+  return data?.id ?? null;
 }
 
 /**
