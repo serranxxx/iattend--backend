@@ -109,6 +109,7 @@ app.use('/api/ventas', require('./router/ventas'));
 app.use('/api/pagos', require('./router/pagos'));
 app.use('/api/admin', require('./router/adminVentas'));
 app.use('/api/admin', require('./router/adminFonts'));
+app.use('/api/admin', require('./router/adminInvitaciones'));
 app.use('/api/configuracion-pagos', require('./router/configuracionPagos'));
 
 const { iniciarReglaVolverAContactar } = require('./helpers/prospectosScheduler');
