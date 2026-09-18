@@ -429,12 +429,76 @@ const crearVendedor = async (req, res = response) => {
     }
 }
 
+// Edición de un vendedor ya creado. Deliberadamente NO toca `codigo_acceso`:
+// el PIN es también la contraseña de su cuenta i attend, así que regenerarlo
+// desde aquí lo dejaría fuera sin avisarle. Tampoco crea cuentas: eso solo
+// pasa en el alta, donde el PIN recién generado es la contraseña inicial.
+const editarVendedor = async (req, res = response) => {
+    const { vendedor_id } = req.params;
+    const { nombre, tipo, telefono, email, descuento_max_pct, activo } = req.body;
+
+    const cambios = {};
+
+    if (nombre !== undefined) {
+        if (typeof nombre !== 'string' || !nombre.trim()) {
+            return res.status(400).json({ ok: false, msg: 'nombre no puede quedar vacío' });
+        }
+        cambios.nombre = nombre.trim();
+    }
+
+    if (tipo !== undefined) {
+        if (!TIPOS_VENDEDOR_VALIDOS.includes(tipo)) {
+            return res.status(400).json({ ok: false, msg: 'tipo debe ser interno o externo' });
+        }
+        cambios.tipo = tipo;
+    }
+
+    if (telefono !== undefined) cambios.telefono = telefono || null;
+    if (email !== undefined) cambios.email = email ? email.trim().toLowerCase() : null;
+    if (activo !== undefined) cambios.activo = Boolean(activo);
+
+    if (descuento_max_pct !== undefined) {
+        const descuento = Number(descuento_max_pct);
+        if (!Number.isFinite(descuento) || descuento < 0 || descuento > 100) {
+            return res.status(400).json({ ok: false, msg: 'descuento_max_pct inválido' });
+        }
+        cambios.descuento_max_pct = descuento;
+    }
+
+    if (Object.keys(cambios).length === 0) {
+        return res.status(400).json({ ok: false, msg: 'No hay nada que actualizar' });
+    }
+
+    try {
+        const { data, error } = await supabase
+            .from('vendedores')
+            .update(cambios)
+            .eq('id', vendedor_id)
+            .select('id, nombre, tipo, telefono, email, descuento_max_pct, codigo_acceso, activo')
+            .single();
+
+        if (error) {
+            return res.status(500).json({ ok: false, msg: error.message });
+        }
+
+        if (!data) {
+            return res.status(404).json({ ok: false, msg: 'Vendedor no encontrado' });
+        }
+
+        return res.status(200).json({ vendedor: data });
+
+    } catch (error) {
+        return res.status(500).json({ ok: false, msg: error.message || 'Internal Server Error' });
+    }
+}
+
 module.exports = {
     listarVentas,
     editarVenta,
     pagosPendientesComprobante,
     listarVendedores,
     crearVendedor,
+    editarVendedor,
     buscarInvitacionesSinVenta,
     crearVentaManual,
 }

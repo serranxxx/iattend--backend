@@ -110,6 +110,7 @@ app.use('/api/pagos', require('./router/pagos'));
 app.use('/api/admin', require('./router/adminVentas'));
 app.use('/api/admin', require('./router/adminFonts'));
 app.use('/api/admin', require('./router/adminInvitaciones'));
+app.use('/api/admin', require('./router/adminGastosFijos'));
 app.use('/api/admin', require('./router/adminGiftBrands'));
 app.use('/api/configuracion-pagos', require('./router/configuracionPagos'));
 
