@@ -4,6 +4,10 @@ const { generarJWT, getIdUserByToken } = require('../helpers/jwt');
 const user = require('../models/user');
 const supabase = require('../config/supabase');
 const { createInvitationWithPlan } = require('./supabase');
+const { resolveAdminUserId } = require('../helpers/adminAuth');
+
+// Roles que el admin puede asignar al crear una cuenta. Sin rol = cliente.
+const ROLES_ASIGNABLES = ['Administration', 'sales', 'planner', 'mkt', 'test'];
 
 
 
@@ -314,9 +318,27 @@ const ensureAccount = async (req, res = response) => {
 };
 
 const createUser = async (req, res = response) => {
-    let { Name, Email, Password } = req.body;
+    let { Name, Email, Password, Role } = req.body;
 
     try {
+
+        // Esta ruta también es el registro público (Login, PreviewMood), así
+        // que un rol solo se acepta si quien llama es admin; si no, cualquiera
+        // podría darse de alta como Administration.
+        Role = Role || null;
+        if (Role) {
+            if (!ROLES_ASIGNABLES.includes(Role)) {
+                return res.status(400).json({ ok: false, msg: `Rol no válido: ${Role}` });
+            }
+
+            const authHeader = req.header('Authorization');
+            const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+            const admin = await resolveAdminUserId(token);
+
+            if (!admin.ok) {
+                return res.status(admin.status).json({ ok: false, msg: admin.msg });
+            }
+        }
 
         Email = Email.toLowerCase();
 
@@ -364,6 +386,7 @@ const createUser = async (req, res = response) => {
                 user_id: data.user.id,
                 full_name: Name,
                 user_email: Email,
+                role: Role,
             }, { onConflict: 'user_id' });
 
         if (profileError) {

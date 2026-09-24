@@ -5,7 +5,7 @@ const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
 const TIPOS_VALIDOS = ['reales', 'pruebas'];
 // Una invitación es "de prueba" cuando su owner tiene alguno de estos roles
-const ROLES_PRUEBA = ['sales', 'test', 'Administration'];
+const ROLES_PRUEBA = ['sales', 'test', 'Administration', 'mkt'];
 
 // Listado paginado para el catálogo de invitaciones del admin.
 // No devuelve `data` completo: solo las llaves de portada, extraídas en el select.
@@ -122,7 +122,53 @@ const obtenerInvitacionData = async (req, res = response) => {
     }
 }
 
+// Asigna (o quita, con planner_id null) el planner de una invitación.
+// La base ya rechaza a quien no tenga role = 'planner' (trigger
+// invitations_check_planner); se valida aquí también para responder un 400
+// claro en vez del error crudo de Postgres.
+const asignarPlanner = async (req, res = response) => {
+    const { invitation_id } = req.params;
+    const plannerId = req.body?.planner_id || null;
+
+    try {
+        if (plannerId) {
+            const { data: planner, error: plannerError } = await supabase
+                .from('profiles')
+                .select('user_id')
+                .eq('user_id', plannerId)
+                .eq('role', 'planner')
+                .maybeSingle();
+
+            if (plannerError) {
+                return res.status(500).json({ ok: false, msg: plannerError.message });
+            }
+            if (!planner) {
+                return res.status(400).json({ ok: false, msg: 'Ese usuario no tiene rol de planner' });
+            }
+        }
+
+        const { data, error } = await supabase
+            .from('invitations')
+            .update({ planner_id: plannerId })
+            .eq('id', invitation_id)
+            .select('id, planner_id')
+            .maybeSingle();
+
+        if (error) {
+            return res.status(500).json({ ok: false, msg: error.message });
+        }
+        if (!data) {
+            return res.status(404).json({ ok: false, msg: 'Invitación no encontrada' });
+        }
+
+        return res.status(200).json({ ok: true, invitation: data });
+    } catch (error) {
+        return res.status(500).json({ ok: false, msg: error.message || 'Internal Server Error' });
+    }
+};
+
 module.exports = {
     listarInvitaciones,
     obtenerInvitacionData,
+    asignarPlanner,
 }
