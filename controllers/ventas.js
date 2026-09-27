@@ -1,6 +1,7 @@
 const { response } = require('express');
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
+const { planEntitlements } = require('../config/plans');
 const { sendMail } = require('./mailer');
 const { vendorWelcomeEmailTemplate } = require('./templates/vendorWelcomeEmail');
 const { isValidPhone } = require('../helpers/validatePhone');
@@ -253,6 +254,11 @@ const crearVenta = async (req, res = response) => {
     const ownerNames = tipo_evento === 'boda' ? owners : [];
 
     try {
+        // 0. Lo que incluye el plan, antes de crear nada: si el catálogo no
+        // responde, mejor fallar aquí que después de dar de alta al cliente.
+        const planLower = plan.toLowerCase();
+        const entitlements = await planEntitlements(planLower);
+
         // 1. Validar el vendedor y su tope de descuento
         const { data: vendedor, error: vendedorError } = await supabase
             .from('vendedores')
@@ -363,7 +369,6 @@ const crearVenta = async (req, res = response) => {
 
         // 5. Crear invitación — si falla, rollback de profiles + usuario (solo si
         // los creamos en este request; si el cliente ya existía, su cuenta nunca se toca)
-        const planLower = plan.toLowerCase();
         const { data: invitation, error: invitationError } = await supabase
             .from('invitations')
             .insert({
@@ -376,7 +381,7 @@ const crearVenta = async (req, res = response) => {
                 event_date: fecha_evento,
                 type: 'closed',
                 active: true,
-                credits: planLower === 'pro' ? 300 : 0,
+                ...entitlements,
                 tickets: 300,
                 owners: ownerNames,
                 url_image: null,

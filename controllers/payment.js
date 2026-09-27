@@ -3,7 +3,14 @@ const router = express.Router();
 const Stripe = require("stripe");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const { createInvitationWithPlan, createCheckoutQueue } = require("./supabase");
-const { PLAN_PRICES } = require("../config/stripe.products");
+const { PLAN_PRICES, PRODUCTS } = require("../config/stripe.products");
+const { getPlan, getPlanByPriceId } = require("../config/plans");
+
+// Un price de plan es válido si está en la lista histórica o si es el que el
+// catálogo tiene hoy para algún plan (Admin → Planes puede cambiarlo).
+const esPrecioDePlan = async (priceId) =>
+  PLAN_PRICES.includes(priceId) || Boolean(await getPlanByPriceId(priceId));
+const supabase = require("../config/supabase");
 
 /**
  * Crear sesión de Checkout
@@ -17,6 +24,24 @@ router.post("/create-checkout", async (req, res) => {
       return res.status(400).json({
         error: "invitationId y priceId son requeridos",
       });
+    }
+
+    // Side events sueltos: solo si el plan de la invitación los permite (hoy
+    // Lite ya no puede comprarlos; tiene que subir a PRO).
+    if (PRODUCTS[priceId]?.type === "side") {
+      const { data: inv } = await supabase
+        .from("invitations")
+        .select("plan")
+        .eq("id", invitationId)
+        .maybeSingle();
+
+      const plan = await getPlan(inv?.plan);
+      if (!plan?.can_buy_side_events) {
+        return res.status(403).json({
+          error: "Este plan no permite comprar side events. Cámbiate a PRO para agregarlos.",
+          code: "SIDE_EVENTS_NOT_ALLOWED",
+        });
+      }
     }
 
     // Crear sesión en Stripe
@@ -62,7 +87,7 @@ router.post("/create-checkout-invitation", async (req, res) => {
       return res.status(400).json({ error: "priceId e invitation son requeridos" });
     }
 
-    if (!PLAN_PRICES.includes(priceId)) {
+    if (!(await esPrecioDePlan(priceId))) {
       return res.status(400).json({ error: "priceId no válido para un plan" });
     }
 
@@ -102,7 +127,7 @@ router.post("/create-checkout-plan", async (req, res) => {
       return res.status(400).json({ error: "userId y priceId son requeridos" });
     }
 
-    if (!PLAN_PRICES.includes(priceId)) {
+    if (!(await esPrecioDePlan(priceId))) {
       return res.status(400).json({ error: "priceId no válido para un plan" });
     }
 
@@ -138,7 +163,7 @@ router.post("/create-checkout-preview", async (req, res) => {
       return res.status(400).json({ error: "userId y priceId son requeridos" });
     }
 
-    if (!PLAN_PRICES.includes(priceId)) {
+    if (!(await esPrecioDePlan(priceId))) {
       return res.status(400).json({ error: "priceId no válido para un plan" });
     }
 

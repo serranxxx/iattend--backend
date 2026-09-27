@@ -155,6 +155,7 @@ CLIENT_URL   # presente en .env pero no se referencia en ningún .js actualmente
 ```
 
 ## Cosas que hay que saber antes de tocar este repo (gotchas)
+- Catálogo de planes: tabla `plans` (`migrations/2026-09-25_create_plans_catalog.sql`), editable desde Admin → Planes (`/api/admin/plans`, `validarAdmin`) y expuesta sin auth en `GET /api/plans` con el precio de Stripe incluido. Toda alta o activación de invitación usa `planEntitlements()` / `getPlan()` de `config/plans.js` (caché de 60 s) y copia `credits`, `credits_included` y `side_events_included` a la invitación — **no** volver a escribir `plan === 'pro' ? 300 : 0`. `activatePlan` suma créditos (no sobrescribe) y nunca baja el tope de side events; comprar un side event suelto sube `side_events_included` en 1 y `/api/payment/create-checkout` lo rechaza (403 `SIDE_EVENTS_NOT_ALLOWED`) si el plan tiene `can_buy_side_events = false`.
 - **MongoDB solo existe para `/api/auth`**: en 2026-07 se eliminaron las
   rutas/controllers/models legacy que corrían sobre Mongo para invitaciones,
   invitados, tags y rsvp (producto "Lovelink") tras confirmar que ningún

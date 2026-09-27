@@ -2,6 +2,7 @@ const supabase = require("../config/supabase");
 const { sendMail } = require("./mailer");
 const { giftEmailTemplate } = require("./templates/giftEmail");
 const { PRODUCTS } = require("../config/stripe.products");
+const { getPlan, getPlanByPriceId, planEntitlements } = require("../config/plans");
 
 /**
  * Guarda preview data en checkout_queue y devuelve el ID
@@ -37,6 +38,8 @@ async function createInvitationFromQueue(queueId, planName) {
 
   const { user_id, user_email, data } = entry;
 
+  const entitlements = await planEntitlements(planName);
+
   const payload = {
     user_id,
     user_email: user_email || null,
@@ -46,7 +49,7 @@ async function createInvitationFromQueue(queueId, planName) {
     phone_number: null,
     type: "closed",
     active: true,
-    credits: planName === "pro" ? 300 : 0,
+    ...entitlements,
     tickets: 300,
     owners: [],
     url_image: null,
@@ -78,7 +81,10 @@ async function processingPayment(session) {
     return;
   }
 
-  const product = PRODUCTS[priceId];
+  // Price nuevo puesto desde Admin → Planes que todavía no está en
+  // stripe.products.js: se resuelve contra el catálogo.
+  const catalogPlan = PRODUCTS[priceId] ? null : await getPlanByPriceId(priceId);
+  const product = PRODUCTS[priceId] || (catalogPlan && { type: "plan", value: catalogPlan.id });
   if (!product) return;
 
   // Preview/checkout flow: create invitation from queued data after payment
@@ -166,6 +172,29 @@ async function addSideEvent(invitationId) {
   if (error) {
     console.error("Error creando side event:", error);
   }
+
+  // El side event comprado también sube el tope: si no, quedaría contado
+  // contra los incluidos del plan. Se sube aunque el insert falle: ya se
+  // cobró, y con el tope arriba el organizador puede crearlo él mismo.
+  const { data: inv, error: fetchError } = await supabase
+    .from("invitations")
+    .select("side_events_included")
+    .eq("id", invitationId)
+    .single();
+
+  if (fetchError || !inv) {
+    console.error("Error leyendo tope de side events:", fetchError);
+    return;
+  }
+
+  const { error: capError } = await supabase
+    .from("invitations")
+    .update({ side_events_included: (inv.side_events_included ?? 0) + 1 })
+    .eq("id", invitationId);
+
+  if (capError) {
+    console.error("Error subiendo tope de side events:", capError);
+  }
 }
 
 /**
@@ -193,6 +222,8 @@ async function createInvitationWithPlan(userId, planName, metadata = {}) {
   const { name, phoneNumber, label, userEmail, owners: ownersRaw } = metadata;
   const owners = ownersRaw ? JSON.parse(ownersRaw) : [];
 
+  const entitlements = await planEntitlements(planName);
+
   const payload = {
     user_id: userId,
     user_email: userEmail || null,
@@ -202,7 +233,7 @@ async function createInvitationWithPlan(userId, planName, metadata = {}) {
     phone_number: phoneNumber || null,
     type: "closed",
     active: true,
-    credits: planName === "pro" ? 300 : 0,
+    ...entitlements,
     tickets: 300,
     owners,
     url_image: null,
@@ -323,15 +354,41 @@ async function createInvitationWithPlan(userId, planName, metadata = {}) {
 }
 
 /**
- * Activación de plan (placeholder para futura lógica)
+ * Activa un plan sobre una invitación existente: borrador de preview, free que
+ * contrata, o upgrade Lite → PRO. Los créditos del plan se SUMAN al saldo (un
+ * Lite pudo haber comprado créditos antes de subir) y el tope de side events
+ * nunca baja: un Lite viejo con 1 incluido que sube a PRO queda con lo del
+ * catálogo de PRO.
  */
 async function activatePlan(invitationId, planName) {
+  const { data: current, error: fetchError } = await supabase
+    .from("invitations")
+    .select("plan, active, credits, credits_included, side_events_included, photo_wall_included")
+    .eq("id", invitationId)
+    .single();
+
+  if (fetchError || !current) {
+    console.error("Error leyendo invitación para activar plan:", fetchError);
+    return;
+  }
+
+  // Stripe reintenta el webhook: si el plan ya quedó activo, no se vuelven a
+  // sumar créditos.
+  if (current.active && String(current.plan).toLowerCase() === planName) return;
+
+  const plan = await getPlan(planName);
+  const credits = plan?.credits_included ?? 0;
+
   const { error } = await supabase
     .from("invitations")
     .update({
       plan: planName,
       active: true,
-      credits: planName === "pro" ? 300 : 0,
+      credits: (current.credits ?? 0) + credits,
+      credits_included: (current.credits_included ?? 0) + credits,
+      side_events_included: Math.max(current.side_events_included ?? 0, plan?.side_events_included ?? 0),
+      // Igual que el tope de side events: subir de plan nunca quita el Photo Wall.
+      photo_wall_included: Boolean(current.photo_wall_included || plan?.photo_wall_included),
     })
     .eq("id", invitationId);
 

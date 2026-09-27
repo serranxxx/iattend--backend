@@ -1,4 +1,5 @@
 const supabase = require("../config/supabase");
+const { planEntitlements } = require("../config/plans");
 
 const updateInvitationActive = async (req, res = response) => {
     const { id, active } = req.body;
@@ -276,7 +277,7 @@ const createInvitationFromPreview = async (req, res) => {
         phone_number: null,
         type: 'closed',
         active: planName !== null,
-        credits: planName === 'pro' ? 300 : 0,
+        ...(await planEntitlements(planName)),
         tickets: 300,
         owners: [],
         url_image: null,
@@ -311,7 +312,7 @@ const setPlan = async (req, res) => {
             .from('invitations')
             .update({
                 plan: planName,
-                credits: planName === 'pro' ? 300 : 0,
+                ...(await planEntitlements(planName)),
                 active: true,
             })
             .eq('id', id);

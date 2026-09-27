@@ -112,6 +112,9 @@ app.use('/api/admin', require('./router/adminFonts'));
 app.use('/api/admin', require('./router/adminInvitaciones'));
 app.use('/api/admin', require('./router/adminGastosFijos'));
 app.use('/api/admin', require('./router/adminGiftBrands'));
+app.use('/api/admin', require('./router/plans').adminRouter);
+app.use('/api/admin', require('./router/adminOnboarding'));
+app.use('/api/plans', require('./router/plans').publicRouter);
 app.use('/api/configuracion-pagos', require('./router/configuracionPagos'));
 
 const { iniciarReglaVolverAContactar } = require('./helpers/prospectosScheduler');
