@@ -4,7 +4,8 @@
 // Gemini clasifica → elige modelo → fallback a Sonnet
 // ============================================================
 
-const { anthropic, openai, genAI, AI_MODELS, calculateCost } = require('../config/ai.config')
+const { anthropic, openai, genAI, AI_MODELS, calculateCost, tokensDeEntradaAnthropic } = require('../config/ai.config')
+const { textoDelSistema } = require('./lia.prompt')
 
 // ------------------------------------------------------------
 // CLASIFICADOR DE INTENT — Gemini Flash
@@ -81,12 +82,14 @@ async function runSonnetLoop(systemPrompt, messages, tools, executeTool, invitat
     const response = await anthropic.messages.create({
       model:      AI_MODELS.SONNET,
       max_tokens: 1024,
-      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+      system: Array.isArray(systemPrompt)
+        ? systemPrompt
+        : [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
       messages:   currentMsgs,
       tools,
     })
 
-    totalIn  += response.usage.input_tokens
+    totalIn  += tokensDeEntradaAnthropic(response.usage)
     totalOut += response.usage.output_tokens
 
     if (response.stop_reason !== 'tool_use') {
@@ -125,7 +128,7 @@ async function runGPTLoop(systemPrompt, messages, tools, executeTool, invitation
     }
   }))
 
-  let currentMsgs = [{ role: 'system', content: systemPrompt }, ...messages]
+  let currentMsgs = [{ role: 'system', content: textoDelSistema(systemPrompt) }, ...messages]
   let totalIn = 0, totalOut = 0, finalText = ''
   const pendingActions = []
 
@@ -152,7 +155,15 @@ async function runGPTLoop(systemPrompt, messages, tools, executeTool, invitation
     const toolMsgs = []
 
     for (const toolCall of choice.message.tool_calls) {
-      const toolInput = JSON.parse(toolCall.function.arguments)
+      // Si GPT manda argumentos que no son JSON, se le regresa el error a él
+      // en vez de tirar todo el loop (y repetir las tools ya ejecutadas en Sonnet).
+      let toolInput
+      try {
+        toolInput = JSON.parse(toolCall.function.arguments || '{}')
+      } catch {
+        toolMsgs.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ error: 'Argumentos inválidos: deben ser JSON' }) })
+        continue
+      }
       const result    = await executeTool(toolCall.function.name, toolInput, invitationId)
       if (result?.requires_confirmation) pendingActions.push(result)
       toolMsgs.push({
@@ -183,7 +194,7 @@ async function runGeminiLoop(systemPrompt, messages, tools, executeTool, invitat
 
   const model = genAI.getGenerativeModel({
     model:             AI_MODELS.GEMINI,
-    systemInstruction: systemPrompt,
+    systemInstruction: textoDelSistema(systemPrompt),
     tools:             geminiTools,
   })
 
@@ -251,42 +262,68 @@ async function orchestrate({
   systemPrompt,
   tools,
   executeTool,
+  intent: intentDado,
 }) {
-  // 1. Clasificar intent con Gemini (no cobra crédito)
-  const intent = await classifyIntent(userMessage, history)
+  // 1. Clasificar intent con Gemini (no cobra crédito). La ruta puede pasarlo
+  // ya clasificado para decidir antes si bloquea una acción masiva.
+  const intent = intentDado || await classifyIntent(userMessage, history)
   console.log(`[orchestrate] intent: ${intent}`)
 
   const messages = [...history, { role: 'user', content: userMessage }]
+
+  // Tools y acciones de UI de todos los intentos. Si un modelo falla y se
+  // escala a Sonnet, las tools ya ejecutadas se vuelven a correr: se guarda
+  // solo el último intento para no duplicarlas.
+  let toolsCalled = []
+  let uiActions   = []
+  const conTracking = () => {
+    toolsCalled = []
+    uiActions   = []
+    return async (toolName, toolInput, invId) => {
+      const result = await executeTool(toolName, toolInput, invId)
+      toolsCalled.push(toolName)
+      if (result?.requires_ui_action) uiActions.push(result.ui_action)
+      return result
+    }
+  }
+
+  // Se cobra lo que de verdad se gastó: si un modelo respondió vacío y se
+  // escaló a Sonnet, se suman los dos. (Los tokens de un intento que lanza
+  // error no se conocen: la SDK no los regresa.)
+  let costoPrevio = 0
 
   // 2. Elegir modelo según intent y ejecutar con fallback a Sonnet
   let result
 
   try {
     if (intent === 'CONSULTA_SIMPLE') {
-      result = await runGeminiLoop(systemPrompt, messages, tools, executeTool, invitationId)
+      result = await runGeminiLoop(systemPrompt, messages, tools, conTracking(), invitationId)
     } else if (intent === 'ACCION') {
-      result = await runGPTLoop(systemPrompt, messages, tools, executeTool, invitationId)
+      result = await runGPTLoop(systemPrompt, messages, tools, conTracking(), invitationId)
     } else {
-      result = await runSonnetLoop(systemPrompt, messages, tools, executeTool, invitationId)
+      result = await runSonnetLoop(systemPrompt, messages, tools, conTracking(), invitationId)
     }
   } catch (err) {
     console.error(`[orchestrate] ${intent} falló (${err.message}), escalando a Sonnet`)
-    result = await runSonnetLoop(systemPrompt, messages, tools, executeTool, invitationId)
+    result = await runSonnetLoop(systemPrompt, messages, tools, conTracking(), invitationId)
   }
 
   // 3. Si el resultado está vacío, fallback a Sonnet
   if (!result.content?.trim() && result.modelId !== AI_MODELS.SONNET) {
     console.warn(`[orchestrate] respuesta vacía de ${result.modelId}, escalando a Sonnet`)
-    result = await runSonnetLoop(systemPrompt, messages, tools, executeTool, invitationId)
+    costoPrevio += calculateCost(result.modelId, result.tokensIn, result.tokensOut)
+    result = await runSonnetLoop(systemPrompt, messages, tools, conTracking(), invitationId)
   }
 
   return {
+    intent,
     content:        result.content,
     modelUsed:      result.modelId,
     tokensIn:       result.tokensIn,
     tokensOut:      result.tokensOut,
-    costUsd:        calculateCost(result.modelId, result.tokensIn, result.tokensOut),
-    toolsCalled:    [],
+    costUsd:        costoPrevio + calculateCost(result.modelId, result.tokensIn, result.tokensOut),
+    toolsCalled,
+    uiActions,
     pendingActions: result.pendingActions || [],
   }
 }

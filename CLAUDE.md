@@ -57,7 +57,7 @@ WhatsApp/email, generación de Apple Wallet passes, y el agente de IA **Lia**
 ```
 config/             clientes de servicios externos (Supabase, IA, Stripe products)
 controllers/        lógica de negocio por dominio (auth, invitation, payment,
-                    whatsapp, wallet, mailer, iattend-ai)
+                    whatsapp, wallet, mailer)
   templates/         plantillas de email (HTML armado en JS)
 database/           conexión a MongoDB (config.js) — solo para /api/auth
 helpers/            utilidades transversales (jwt.js)
@@ -93,6 +93,12 @@ index.js            registro de middlewares, CORS, montaje de rutas, arranque
 - Costos de IA se calculan en `config/ai.config.js` (`calculateCost`) y se
   registran vía `log_ai_interaction` — cualquier modelo/proveedor nuevo debe
   agregarse a `MODELS`/`TOKEN_COSTS` ahí.
+- Los prompts de Lia viven en `models/lia.prompt.js`, en dos bloques: reglas
+  fijas (con `cache_control`, Sonnet las cachea junto con las tools) y datos
+  del día/evento. No meter texto del usuario ni datos cambiantes en el bloque
+  fijo: rompe la caché y abre la puerta a inyección de prompt. La fecha del
+  evento es hora "de pared" (`slice(0, 10)`, sin convertir zona); "hoy" se
+  calcula en CDMX.
 - Personalidad y terminología de Lia (tiers, estados, ids internos vs.
   lenguaje al usuario) están documentadas en la sección dedicada al final de
   este archivo — no exponer nombres de funciones, RPCs ni IDs internos en las
@@ -103,7 +109,7 @@ index.js            registro de middlewares, CORS, montaje de rutas, arranque
 |---|---|---|
 | `/api/auth` | `router/auth.js` | login/registro legacy (Mongo + bcrypt) — sigue en uso real desde `iattend-vite`; algunas rutas también tocan `profiles` en Supabase |
 | `/api/invitation` | `router/invitation.js` | invitaciones actuales sobre Supabase: crear desde preview, planes, créditos, datos del evento |
-| `/api/ai` | `router/ai.chat.route.js`, `router/ai.credits.route.js`, `router/iattendai.js` | Lia (greeting/chat/approve/reject/feedback), consulta de créditos, generación de invitación por IA |
+| `/api/ai` | `router/ai.chat.route.js`, `router/ai.credits.route.js` | Lia (greeting/chat/approve/reject/feedback), consulta de créditos. Todas piden `Authorization: Bearer` y acceso a la invitación (`middlewares/validar-acceso-invitacion.js`), salvo `/guest-chat`: ese es público y se contiene en el propio handler (Haiku, mensaje ≤ 500 caracteres, historial ≤ 10 turnos, 20 preguntas / 10 min por IP, 300 al día por invitación contadas en `ai_agent_logs` con `tool_called` `guest_chat…`, solo invitaciones activas cuyo plan trae la feature `lia`) |
 | `/api/mail` | `router/mailer.js` | envío de emails transaccionales (gift, notificaciones) |
 | `/api/whats` | `router/whatsapp.js` | envío de plantillas WhatsApp y texto libre; `/api/whats/reminders` envía el template `reminder` (recordatorio manual, registra en `invitation_reminder_dispatches` e incrementa `guests.reminder_count`/`last_reminder_at` del principal) |
 | `/api/webhook` | `router/webhook.js` | webhook entrante de WhatsApp (verify + receive) |
@@ -215,11 +221,11 @@ genéricas de arriba pero sigue siendo la referencia viva para trabajar sobre
 `models/sonnet.stream.loop.js`.
 
 ### Sistema de créditos
-- Los créditos viven en `invitations.credits` — no hay tabla separada
-- 1 consulta al agente = 1 crédito
-- La compra de créditos usa el Stripe existente de iAttend
-- `consume_ai_credit(invitation_id)` descuenta 1 crédito atómicamente
-- Si credits = 0 → error 402 NO_CREDITS
+- Lia tiene su propio saldo, separado de `invitations.credits` (créditos I attend de WhatsApp/idiomas): una fila por invitación y día en `ai_daily_usage` (día de CDMX)
+- 1 crédito de Lia = $0.01 USD de modelo, mínimo 1 por mensaje (`consume_lia_credits(p_invitation_id, p_cost_usd)`, se cobra después de responder)
+- 50 gratis al día (`free_limit`/`free_used`, se reinician a medianoche) + `paid_balance`, que no caduca: la fila nueva hereda el de la última (`get_or_create_daily_usage`)
+- `paid_balance` se llena canjeando créditos I attend: `POST /api/ai/credits/purchase` → RPC `canjear_creditos_lia` (descuento y abono en una transacción). Los paquetes viven solo en `LIA_PACKAGES` (`router/ai.credits.route.js`)
+- Sin saldo → 402 `NO_CREDITS`. Estos RPC solo los ejecuta `service_role` (ver `migrations/2026-09-29b_canje_creditos_lia.sql`)
 
 ### Cómo funciona Lia — flujo completo
 ```
@@ -264,7 +270,6 @@ Usuario cierra Lia
 - `ai_conversations` — historial de mensajes (analytics only, no se lee para contexto)
 - `ai_agent_logs` — registro de llamadas al modelo (tokens, costo, duración)
 - `ai_pending_actions` — acciones propuestas esperando confirmación del usuario
-- `ai_agent_credits` — tabla reservada, no se usa activamente
 
 **Notas importantes**
 - `confirmado` y `asistente` son equivalentes — ambos significan que el invitado viene
@@ -334,10 +339,12 @@ update_event_date(p_invitation_id, p_new_date)
 
 **Billing**
 ```
-consume_ai_credit(p_invitation_id)
-  → UPDATE invitations SET credits = credits - 1
-  → atómico — usa FOR UPDATE para evitar race conditions
-  → retorna credits_remaining o error NO_CREDITS
+get_lia_credits_status(p_invitation_id) / get_or_create_daily_usage(p_invitation_id)
+  → saldo de Lia del día (free + paid_balance heredado)
+consume_lia_credits(p_invitation_id, p_cost_usd)
+  → CEIL(cost/0.01) créditos, primero gratis y luego pagados, FOR UPDATE
+canjear_creditos_lia(p_invitation_id, p_ai_credits, p_iattend_cost)
+  → descuenta invitations.credits y suma paid_balance, atómico
 
 log_ai_interaction(p_invitation_id, p_model, p_tokens_in, p_tokens_out,
                    p_cost_usd, p_tool_called, p_conversation_id,

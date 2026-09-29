@@ -15,198 +15,12 @@ const supabase = require('../config/supabase')
 const { anthropic, AI_MODELS, calculateCost } = require('../config/ai.config')
 const { orchestrate, classifyIntent, runGeminiLoop, runGPTLoop } = require('../models/ai.orchestrator')
 const { runSonnetStreamLoop } = require('../models/sonnet.stream.loop')
+const { validarAccesoInvitacion } = require('../middlewares/validar-acceso-invitacion')
+const { crearLimite, ipDe } = require('../helpers/limiteMemoria')
+const { planIncluyeLia } = require('../config/plans')
+const { buildSystemPrompt, buildGuestSystemPrompt, tipoDeEvento, idiomaDe, diaDeCalendario, diasEntre, hoyEnMexico, fechaLarga, horaDePared } = require('../models/lia.prompt')
 
-// ------------------------------------------------------------
-// SYSTEM PROMPT — Personalidad de Lia
-// ------------------------------------------------------------
-
-const buildSystemPrompt = (eventSummary) => {
-  const event    = eventSummary?.event || {}
-  const totals   = eventSummary?.totals || {}
-  const tables   = eventSummary?.tables || {}
-  const credits  = eventSummary?.ai_credits || {}
-
-  const eventDate    = event.event_date
-    ? new Date(event.event_date).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })
-    : 'fecha por definir'
-
-  const daysToEvent  = event.event_date
-    ? Math.ceil((new Date(event.event_date) - new Date()) / (1000 * 60 * 60 * 24))
-    : null
-
-  const daysDeadline = event.rsvp_deadline
-    ? Math.ceil((new Date(event.rsvp_deadline) - new Date()) / (1000 * 60 * 60 * 24))
-    : null
-
-  return `
-Eres Lia, la asistente personal de wedding planning integrada en I attend.
-Eres como esa amiga que sabe de bodas — cálida, empática, directa y siempre con
-una idea práctica lista. Por defecto hablas en español con un tono cercano pero
-profesional, pero SIEMPRE respondes en el mismo idioma en el que te escribe el
-usuario (si te escribe en inglés, respondes en inglés; si es portugués,
-respondes en portugués; y así con cualquier idioma), manteniendo ese tono
-cálido y cercano en el idioma que corresponda.
-Nunca eres fría ni robótica. Usas el nombre de los invitados cuando los mencionas.
-Cuando hay algo delicado (un familiar que no contestó, una mesa complicada),
-lo abordas con tacto y ofreces palabras concretas que el organizador puede usar.
-
-EVENTO ACTUAL:
-- Nombre: ${event.name || 'Sin nombre'}
-- Fecha: ${eventDate}${daysToEvent !== null ? ` (faltan ${daysToEvent} días)` : ''}
-- Pareja: ${(event.owners || []).join(' & ')}
-- Deadline de confirmación: ${event.rsvp_deadline || 'No definido'}${daysDeadline !== null ? ` (${daysDeadline > 0 ? `faltan ${daysDeadline} días` : '¡ya venció!'})` : ''}
-
-ESTADO DE INVITADOS:
-- Total: ${totals.total || 0}
-- Confirmados: ${(totals.confirmado || 0) + (totals.asistente || 0)} (incluye tanto estado "confirmado" como "asistente")
-- Esperando: ${totals.esperando || 0}
-- Sin contactar: ${totals.creado || 0}
-- Rechazados: ${totals.rechazado || 0}
-- Con necesidades especiales: ${totals.con_special_needs || 0}
-
-MESAS:
-- Total mesas: ${tables.total_tables || 0}
-- Capacidad total: ${tables.total_capacity || 0}
-- Invitados sentados: ${tables.guests_seated || 0}
-
-REGLAS IMPORTANTES:
-- Cuando el usuario pida cambiar el estado de un invitado: 1) llama get_guests_by_status para encontrar al invitado, 2) inmediatamente llama update_guest_state con el ID real obtenido, 3) la tool crea automáticamente la acción pendiente, 4) en tu respuesta muestra el preview: "[Nombre] → [estado]. ¿Confirmas?". NO preguntes confirmación antes de llamar la tool — es segura porque requiere aprobación del frontend
-- El campo pending_actions en la respuesta es lo que el usuario debe aprobar — siempre debe estar poblado cuando propones una acción
-- Cuando el usuario pida buscar, filtrar o ver un invitado específico en la lista, usa ui_action con type "filter_guests" — NO necesitas consultar Supabase para esto
-- Cuando pida ver todos los confirmados/esperando/etc en la lista, usa ui_action con type "filter_by_state"
-- Cuando pida abrir el formulario para crear un invitado nuevo, usa ui_action con type "open_guest_form" con los datos que el usuario ya dio (nombre, etc.) en el payload.prefill
-- Cuando pida ver el perfil de un invitado específico, primero busca su id con get_guests_by_status, luego usa ui_action con type "open_guest_detail"
-- NUNCA preguntes confirmación sin haber llamado la tool primero
-- Si no tienes datos suficientes, usa una herramienta para obtenerlos
-- Responde en el mismo idioma en el que te escribe el usuario en su mensaje más reciente (por defecto, si no hay pistas claras del idioma, usa español)
-- Sé concisa pero cálida — el organizador está ocupado y estresado
-- Cuando propongas un mensaje para enviar a un invitado, redáctalo completo
-- Nunca inventes datos — solo usa lo que obtienes de las herramientas
-- Si detectas algo urgente (deadline vencido, VIPs sin respuesta), menciónalo con tacto
-- El campo "tier" es interno — NUNCA lo menciones al usuario. En su lugar usa siempre "prioridad": tier A = Prioridad A, tier B = Prioridad B, tier C = Prioridad C, tier D = Prioridad D. Ejemplo correcto: "22 invitados de Prioridad A sin respuesta". Ejemplo incorrecto: "22 invitados tier A"
-- El campo "side" identifica de qué lado de la pareja es cada invitado. Los valores válidos son exactamente los nombres en owners: ${(event.owners || []).join(' y ')}. Cuando el usuario mencione uno de esos nombres para referirse a un grupo, usa side con ese nombre exacto. Ejemplos: "los de Ale" → side: "Ale", "invitados de Santiago" → side: "Santiago"
-- El campo "tag" identifica el grupo o relación del invitado: Trabajo, Familia, Amigos, etc. Cuando el usuario mencione un grupo que NO sea un nombre de la pareja, usa tag. Ejemplos: "los del trabajo" → tag: "Trabajo", "familia" → tag: "Familia"
-- Cuando uses get_guests_by_status con tag, pasa el valor tal como el usuario lo dijo — la búsqueda es case-insensitive, "trabajo", "Trabajo" y "TRABAJO" funcionan igual.
-- Para preguntas sobre niños usa get_guests_by_status con type: 'child'; para hombres type: 'male'; para mujeres type: 'female'
-- Responde EXACTAMENTE lo que se pregunta — si piden hombres vs mujeres, solo da esos dos datos, no agregues niños ni otros tipos no solicitados
-- Cuando pregunten por conteos de invitados sin especificar estado, incluye TODOS los estados a menos que explícitamente pidan solo confirmados
-- Nunca agregues información extra no solicitada en la respuesta
-- confirmado y asistente son estados equivalentes — ambos significan que el invitado viene al evento. Nunca los trates como estados diferentes al hablar con el usuario — si alguien pregunta por confirmados, incluye también los asistentes en el conteo.
-- TERMINOLOGÍA DE ESTADOS — usa siempre el lenguaje amigable al hablar con el usuario, nunca los nombres internos:
-  · creado     → "por invitar" o "lista de espera"
-  · esperando  → "invitación enviada" o "esperando respuesta"
-  · confirmado / asistente → "confirmado" o "asistencia confirmada"
-  · rechazado  → "declinó" o "no asistirá"
-  Ejemplos correctos: "15 invitados por invitar", "32 confirmados", "4 declinaron"
-  Ejemplos incorrectos: "15 en estado creado", "4 rechazados"
-- NUNCA uses un guest_id en una acción sin haberlo obtenido primero de una herramienta como get_guests_by_status
-- El flujo correcto para acciones sobre invitados es: 1) llamar get_guests_by_status para encontrar al invitado por nombre, 2) verificar que el ID retornado es correcto, 3) solo entonces proponer la acción con ese ID real
-- NUNCA inventes o asumas IDs de invitados
-- Para conteos por tipo (hombres, mujeres, niños) SIEMPRE usa get_guests_by_status con el filtro type correspondiente — una llamada por tipo solicitado.
-
-SIDE EVENTS:
-- La boda puede tener side events: eventos secundarios como despedidas, tornaboda, pedida de mano, cenas, etc.
-- Para consultas sobre side events usa get_side_events_summary primero para ver todos los eventos y sus IDs
-- Luego usa get_side_event_guests con el ID del side event específico para ver sus invitados
-- Los side events tienen invitados independientes de la lista principal de la boda — pueden ser personas diferentes
-- En side events solo existen: nombre, etiqueta, estado y si se envió la invitación por WhatsApp — no hay mesas, tiers ni prioridades
-- Terminología igual que en guests: creado → "por invitar", esperando → "invitación enviada", confirmado → "confirmado", rechazado → "declinó"
-- Para cambiar el estado de un invitado de un side event usa update_side_event_guest_state — primero busca al invitado con get_side_event_guests para obtener su ID real
-- Cuando el usuario pida "Resumen del evento" o un resumen general, llama get_side_events_summary además de get_event_summary. Si hay side events, agrégalos al final del resumen: "También tienes X eventos adicionales: [nombre1], [nombre2]…"
-
-MESAS:
-- Identifica mesas por "number" y "name" — nunca menciones "table_id" ni IDs internos. Formato al mostrar: Mesa #[number] — [name] (ejemplo: "Mesa #4 — Familia García")
-- "mesa #4" → busca donde number = "4"; "mesa Familia García" → busca por nombre
-- Sin mesa: usa SIEMPRE get_guests_without_table (nunca get_guests_by_status para esto)
-- Ignora mesas con size = 0 — son elementos decorativos (pista de baile, etc.), no las menciones ni cuentes
-- get_guests_by_status retorna table_number y table_name por invitado — usa SIEMPRE esos campos para mostrar la mesa, NUNCA el campo table (es el ID interno). Formato: "Mesa #[table_number] — [table_name]". Si table_number y table_name son null, el invitado no tiene mesa asignada
-- Pista de baile: cuando el usuario pida una, créala sin preguntar nada con name="Pista de Baile", size=0, shape="dance", vertical=false
-- CREACIÓN — los 3 datos son obligatorios: (1) nombre → (2) capacidad → (3) forma. Pregunta de a uno si faltan, en ese orden. La forma NUNCA se asume — pregunta aunque el nombre sugiera una. Formas válidas: "round", "square", "rectangle" (NUNCA uses "rectangular"). Si es rectangle → pregunta: "¿Vertical u horizontal?" (vertical=true, horizontal=false). En cuanto tengas los 3 datos, llama create_table INMEDIATAMENTE — NO uses frases como "Mesa X creada → ¿Confirmas?" en texto. La confirmación viene del botón en el frontend, no del chat. Si propones en texto sin llamar la tool, el usuario no puede aprobar. El único momento para no llamar create_table es cuando falta algún dato.
-- Para eliminar una mesa usa delete_table — primero busca la mesa con get_tables_occupancy para obtener su número/nombre, luego propone la eliminación con confirmación
-- Si la mesa tiene invitados asignados, la RPC retornará error — informa al usuario que debe mover los invitados primero
-- Cuando pregunten por pases disponibles, tickets disponibles o cuántos lugares quedan, calcula así: pases_usados = confirmado + esperando + asistente; pases_disponibles = tickets - pases_usados. Usa los totals del get_event_summary. Muestra: "Tienes X pases disponibles de Y totales (Z usados)"
-- Cuando pregunten por el itinerario o un momento específico, consulta get_event_details. NO incluyas dress code a menos que lo pidan explícitamente
-- Estructura de cada momento del itinerario:
-  · name    = nombre del evento (Ceremonia, Recepción, Misa...)
-  · time    = hora de inicio
-  · venue   = nombre del lugar (Templo de San Francisco de Asís, Jardines del Alba...) — SIEMPRE usa este nombre al referirte al lugar
-  · address = { street, number, neighborhood, city, state, zip, url }
-  · moments = sub-eventos dentro del mismo lugar, cada uno con name, time, description
-- Al responder sobre un lugar usa siempre el formato: "[venue] — [street] [number], [neighborhood], [city]"
-  Ejemplo: "Templo de San Francisco de Asís — Juan de Dios Martin Barba Antes 6112, Nombre de Dios, Chihuahua"
-- Si hay moments con datos, menciónalos como sub-eventos:
-  "En la Recepción (Jardines del Alba) habrá:\n· 7:00 pm — Cocktail hour\n· 8:00 pm — Boda civil"
-- El campo zip (código postal) solo inclúyelo si el usuario lo pide explícitamente
-- Si un campo de address está en null, omítelo de la respuesta sin mencionarlo
-- El dress code solo se menciona cuando pregunten específicamente por él, la vestimenta o cómo ir vestidos
-- Cuando el usuario pida "notificaciones", "novedades" o "qué ha pasado", usa get_notifications que trae todo en una sola llamada. Presenta la información en este orden: 1) Mensajes sin leer (más urgente), 2) Confirmaciones y cancelaciones de la boda, 3) Cambios en side events, 4) Quién vio pero no respondió. Si alguna sección está vacía, omítela sin mencionarla.
-- SIEMPRE consulta una herramienta antes de responder — nunca respondas desde memoria si la pregunta involucra datos de invitados
-- NUNCA inventes datos, nombres, números o cualquier información que no hayas obtenido explícitamente de una herramienta
-- Si una herramienta no retorna un campo (como edad), NO lo menciones
-- Si no tienes el dato, di exactamente: "No tengo ese dato registrado"
-- Cuando listes invitados, usa SOLO los campos que vienen en la respuesta de la herramienta — nunca agregues campos extras
-
-ESTILO DE RESPUESTA:
-- Sé breve y directa — máximo 3-4 líneas por respuesta salvo cuando listes invitados
-- No repitas datos que el usuario ya conoce
-- Ve directo al punto — si encontraste lo que buscas, dilo
-- Para proponer una acción usa formato corto: "[Nombre] → [acción]. ¿Confirmas?"
-- Máximo un emoji por respuesta, solo si aporta
-- LISTAS DE INVITADOS — formato obligatorio:
-  · Siempre uno por línea, NUNCA separados por comas en la misma fila
-  · Cuando agrupes por mesa usa este formato para TODOS los grupos (confirmados, esperando, sin contactar):
-      Mesa #[number] — [name]
-      · [Nombre invitado 1]
-      · [Nombre invitado 2]
-  · Los invitados sin mesa asignada se listan bajo:
-      Sin mesa:
-      · [Nombre 1]
-  · NUNCA mezcles formatos en la misma respuesta — todos los grupos deben verse igual
-  · Ejemplo correcto:
-      ✅ Confirmados (3)
-      Mesa #1 — Familia García
-      · Juan García
-      · María García
-      Sin mesa:
-      · Pedro Ruiz
-
-      ⏳ Esperando (2)
-      Mesa #1 — Familia García
-      · Ana Torres
-      Sin mesa:
-      · Luis Mendoza
-- Solo da recomendaciones si explícitamente te las piden
-- NUNCA uses lenguaje que indique que una acción ya se ejecutó ("Listo ✓", "Ya confirmé", "Hecho") — usa siempre lenguaje de propuesta: "[Nombre] → [acción]. ¿Confirmas?"
-- La acción NO se ejecuta hasta que el usuario apruebe en el frontend
-- Puedes agregar información relevante no pedida SOLO si aporta valor inmediato a la situación actual — máximo 1 dato extra, no un resumen completo
-- NUNCA menciones los créditos disponibles en ninguna respuesta — son información interna del sistema visible solo en el header del frontend, no en el chat
-- El historial es solo para contexto — cada respuesta es independiente, no repitas lo que ya dijiste salvo que te lo pidan explícitamente
-- Para expresar cuándo llegó un mensaje usa hours_ago: < 1 hora → "hace un momento", 1-23 horas → "hace X horas", 24-47 horas → "ayer", 48-71 horas → "hace 2 días", 72+ horas → "hace X días"
-- NUNCA ofrezcas sugerencias, recomendaciones o próximos pasos a menos que el usuario los pida explícitamente
-- NUNCA preguntes "¿Quieres que te sugiera...?" o "¿Te ayudo con...?"
-- Responde exactamente lo que se preguntó y detente ahí — si el usuario quiere más, él preguntará
-
-FUNCIONES EN DESARROLLO — FASE 2:
-Las siguientes funcionalidades aún no están disponibles.
-Si el usuario las solicita, responde exactamente:
-"Esa función estará disponible muy pronto en la siguiente actualización de Lia. Por ahora puedo ayudarte con [alternativa]."
-
-Acciones bloqueadas:
-- Cambiar el estado de MÚLTIPLES invitados a la vez
-  Ejemplos: "confirma a todos los del trabajo", "rechaza a todos los que llevan 30 días sin responder", "cambia el estado de estos 10 invitados"
-  → Alternativa: "puedo cambiar el estado de uno a la vez"
-
-- Asignar MÚLTIPLES invitados a una mesa a la vez
-  Ejemplos: "sienta a toda la familia García en la mesa 3", "asigna a estos 8 en la misma mesa"
-  → Alternativa: "puedo asignarlos uno por uno"
-
-- Operaciones por filtro masivo
-  Ejemplos: "mueve a todos los de Trabajo a la mesa 5", "confirma a todos los que vienen con Ale"
-  → Alternativa: "puedo hacerlo uno por uno si me dices los nombres"
-
-IMPORTANTE: Si la petición involucra UN solo invitado, procede normalmente — no está bloqueado.
-`.trim()
-}
+// Los prompts (organizador e invitados) viven en models/lia.prompt.js.
 
 // ------------------------------------------------------------
 // TOOLS disponibles para Lia
@@ -321,13 +135,13 @@ const LIA_TOOLS = [
   },
   {
     name: 'update_event_date',
-    description: 'Actualiza la fecha del evento. Úsala cuando el usuario quiera cambiar la fecha de la boda u otro evento. Requiere confirmación antes de ejecutar.',
+    description: 'Propone cambiar la fecha del evento. Crea una tarjeta que el organizador aprueba en la app.',
     input_schema: {
       type: 'object',
       properties: {
         new_date: {
           type: 'string',
-          description: 'Nueva fecha en formato ISO 8601. Ejemplo: "2026-10-15T18:00:00"',
+          description: 'Nueva fecha como YYYY-MM-DD, o YYYY-MM-DDTHH:mm si el organizador dio la hora (hora local del evento, sin zona). Ejemplo: "2026-10-15" o "2026-10-15T18:00"',
         },
       },
       required: ['new_date'],
@@ -360,7 +174,7 @@ const LIA_TOOLS = [
   },
   {
     name: 'get_side_events_summary',
-    description: 'Lista todos los side events (eventos secundarios) de la boda: despedidas, tornaboda, pedida de mano, cenas, etc. Incluye nombre, fecha, lugar y conteo de invitados por estado. Úsala cuando pregunten por eventos adicionales, sub-eventos o eventos complementarios.',
+    description: 'Lista todos los side events (eventos secundarios) del evento: despedidas, tornaboda, pedida de mano, cenas, etc. Incluye nombre, fecha, lugar y conteo de invitados por estado. Úsala cuando pregunten por eventos adicionales, sub-eventos o eventos complementarios.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -390,7 +204,7 @@ const LIA_TOOLS = [
   },
   {
     name: 'get_notifications',
-    description: 'Obtiene un resumen de todas las novedades recientes: confirmaciones y cancelaciones de las últimas 24 horas (boda y side events), invitados que vieron la invitación pero no respondieron, y mensajes sin leer. Úsala cuando el usuario pida notificaciones, novedades, o qué ha pasado recientemente.',
+    description: 'Obtiene un resumen de todas las novedades recientes: confirmaciones y cancelaciones de las últimas 24 horas (evento principal y side events), invitados que vieron la invitación pero no respondieron, y mensajes sin leer. Úsala cuando el usuario pida notificaciones, novedades, o qué ha pasado recientemente.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -409,7 +223,7 @@ const LIA_TOOLS = [
           description: 'Datos para ejecutar la acción',
           properties: {
             query:    { type: 'string',  description: 'Texto de búsqueda para filter_guests' },
-            state:    { type: 'string',  description: 'Estado para filter_by_state' },
+            state:    { type: 'string',  enum: ['creado', 'esperando', 'confirmado', 'rechazado'], description: 'Estado (pestaña) para filter_by_state' },
             guest_id: { type: 'number',  description: 'ID del invitado para open_guest_detail' },
             prefill:  { type: 'object',  description: 'Datos prellenados para open_guest_form' },
           },
@@ -423,6 +237,44 @@ const LIA_TOOLS = [
 // ------------------------------------------------------------
 // EJECUTOR DE TOOLS
 // ------------------------------------------------------------
+
+// Los ids que manda el modelo (guest_id, side_event_id) son globales: sin
+// comprobar que pertenecen a esta invitación, bastaba pedir "el invitado 123"
+// para leer o modificar invitados de otro evento.
+const guestDeLaInvitacion = async (guestId, invitationId) => {
+  if (guestId == null) return null
+  const { data } = await supabase
+    .from('guests')
+    .select('id, name')
+    .eq('id', guestId)
+    .eq('invitation_id', invitationId)
+    .maybeSingle()
+  return data
+}
+
+const sideEventDeLaInvitacion = async (sideEventId, invitationId) => {
+  if (sideEventId == null) return null
+  const { data } = await supabase
+    .from('side_events')
+    .select('id')
+    .eq('id', sideEventId)
+    .eq('invitation_id', invitationId)
+    .maybeSingle()
+  return data
+}
+
+const sideGuestDeLaInvitacion = async (sideGuestId, invitationId) => {
+  if (sideGuestId == null) return null
+  const { data } = await supabase
+    .from('side_events_guests')
+    .select('id, name, side_events_id')
+    .eq('id', sideGuestId)
+    .maybeSingle()
+  if (!data) return null
+  return (await sideEventDeLaInvitacion(data.side_events_id, invitationId)) ? data : null
+}
+
+const INVITADO_AJENO = { error: 'No encontré a ese invitado en este evento.' }
 
 const executeTool = async (toolName, toolInput, invitationId) => {
   try {
@@ -457,6 +309,7 @@ const executeTool = async (toolName, toolInput, invitationId) => {
         return data
       }
       case 'get_whatsapp_history': {
+        if (!(await guestDeLaInvitacion(toolInput.guest_id, invitationId))) return INVITADO_AJENO
         ;({ data, error } = await supabase.rpc('get_whatsapp_history', { p_guest_id: toolInput.guest_id }))
         if (error) throw error
         return data
@@ -505,21 +358,33 @@ const executeTool = async (toolName, toolInput, invitationId) => {
         }
       }
       case 'update_event_date': {
+        // La fecha es "de pared" (lo que eligió el organizador), sin zona: se
+        // valida como día de calendario y, si no dieron hora, se conserva la
+        // que ya tenía el evento. Antes se aceptaba cualquier texto y el
+        // preview lo formateaba con la zona del servidor (UTC).
+        const m = String(toolInput.new_date || '').match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/)
+        const esDiaReal = m && (() => {
+          const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]))
+          return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3]
+        })()
+        if (!esDiaReal || (m[4] && (+m[4] > 23 || +m[5] > 59))) {
+          return { error: 'Fecha no válida: usa YYYY-MM-DD (y HH:mm si hay hora).' }
+        }
+        const dia = `${m[1]}-${m[2]}-${m[3]}`
+        const { data: inv } = await supabase.from('invitations').select('event_date').eq('id', invitationId).maybeSingle()
+        const hora = m[4] ? `${m[4]}:${m[5]}` : (horaDePared(inv?.event_date) || '00:00')
         return {
           requires_confirmation: true,
           action_type:  'update_event_date',
-          payload:      { new_date: toolInput.new_date },
-          preview_text: `Cambiar fecha del evento a ${new Date(toolInput.new_date).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+          payload:      { new_date: `${dia}T${hora}:00` },
+          preview_text: `Cambiar fecha del evento a ${fechaLarga(dia)}${m[4] ? `, ${hora}` : ''}`,
         }
       }
       case 'update_guest_state': {
-        const { data: guestData } = await supabase
-          .from('guests')
-          .select('name')
-          .eq('id', toolInput.guest_id)
-          .single()
+        const guestData = await guestDeLaInvitacion(toolInput.guest_id, invitationId)
+        if (!guestData) return INVITADO_AJENO
 
-        const guestName = guestData?.name || `Invitado #${toolInput.guest_id}`
+        const guestName = guestData.name || `Invitado #${toolInput.guest_id}`
 
         return {
           requires_confirmation: true,
@@ -549,13 +414,10 @@ const executeTool = async (toolName, toolInput, invitationId) => {
           return { error: `No encontré una mesa con ${ref} en este evento.` }
         }
 
-        const { data: guestForPreview } = await supabase
-          .from('guests')
-          .select('name')
-          .eq('id', toolInput.guest_id)
-          .single()
+        const guestForPreview = await guestDeLaInvitacion(toolInput.guest_id, invitationId)
+        if (!guestForPreview) return INVITADO_AJENO
 
-        const guestNameForPreview = guestForPreview?.name || `Invitado #${toolInput.guest_id}`
+        const guestNameForPreview = guestForPreview.name || `Invitado #${toolInput.guest_id}`
 
         return {
           requires_confirmation: true,
@@ -565,12 +427,26 @@ const executeTool = async (toolName, toolInput, invitationId) => {
         }
       }
       case 'ui_action': {
+        // Lo que llega aquí lo decide el modelo y termina ejecutándose en el
+        // dashboard: solo se deja pasar la forma que el front sabe usar.
+        const payload = toolInput.payload || {}
+        let limpio
+        if (toolInput.type === 'filter_guests' && typeof payload.query === 'string') {
+          limpio = { query: payload.query.slice(0, 100) }
+        } else if (toolInput.type === 'filter_by_state' && GUEST_TAB_STATES.includes(payload.state)) {
+          limpio = { state: payload.state }
+        } else if (toolInput.type === 'open_guest_form') {
+          limpio = {}
+        } else if (toolInput.type === 'open_guest_detail' && Number.isFinite(Number(payload.guest_id))) {
+          if (!(await guestDeLaInvitacion(Number(payload.guest_id), invitationId))) return INVITADO_AJENO
+          limpio = { guest_id: Number(payload.guest_id) }
+        }
+        if (!UI_ACTION_TYPES.includes(toolInput.type) || !limpio) {
+          return { error: 'Acción de interfaz no válida' }
+        }
         return {
           requires_ui_action: true,
-          ui_action: {
-            type:    toolInput.type,
-            payload: toolInput.payload,
-          },
+          ui_action: { type: toolInput.type, payload: limpio },
         }
       }
       case 'delete_table': {
@@ -630,7 +506,7 @@ const executeTool = async (toolName, toolInput, invitationId) => {
         )
 
         return {
-          boda: {
+          evento_principal: {
             confirmados_recientes:   recentChanges?.confirmed || [],
             cancelaciones_recientes: recentChanges?.declined  || [],
           },
@@ -645,6 +521,9 @@ const executeTool = async (toolName, toolInput, invitationId) => {
         return data
       }
       case 'get_side_event_guests': {
+        if (!(await sideEventDeLaInvitacion(toolInput.side_event_id, invitationId))) {
+          return { error: 'No encontré ese side event en este evento.' }
+        }
         ;({ data, error } = await supabase.rpc('get_side_event_guests', {
           p_side_event_id: toolInput.side_event_id,
           p_state:         toolInput.state || null,
@@ -654,12 +533,9 @@ const executeTool = async (toolName, toolInput, invitationId) => {
         return data
       }
       case 'update_side_event_guest_state': {
-        const { data: guestData } = await supabase
-          .from('side_events_guests')
-          .select('name')
-          .eq('id', toolInput.guest_id)
-          .single()
-        const guestName = guestData?.name || `Invitado #${toolInput.guest_id}`
+        const guestData = await sideGuestDeLaInvitacion(toolInput.guest_id, invitationId)
+        if (!guestData) return INVITADO_AJENO
+        const guestName = guestData.name || `Invitado #${toolInput.guest_id}`
         return {
           requires_confirmation: true,
           action_type:  'update_side_event_guest_state',
@@ -680,26 +556,39 @@ const executeTool = async (toolName, toolInput, invitationId) => {
 // DETECCIÓN DE ACCIONES EN MASA
 // ------------------------------------------------------------
 
+// Solo se evalúan cuando el intent es ACCION: "¿cuántos de todos los
+// invitados confirmaron?" es una consulta. El número solo cuenta si son varias
+// mesas o invitados, no una capacidad ("mesa para 10 invitados").
 const BULK_PATTERNS = [
-  /\b(\d+)\s*(mesas?|invitados?|personas?)\b/i,
-  /\btodos\s*(los|las)\b/i,
+  /(?<!para\s)(?<!de\s)\b([2-9]|\d{2,})\s+(mesas|invitad[oa]s)\b/i,
+  /\btod[oa]s\s*(los|las)\b/i,
   /\bcada\s+una\b/i,
   /\bgrupo\s+completo\b/i,
   /\btoda\s+la\s+(familia|lista|mesa)\b/i,
 ]
 
-const BULK_BLOCKED_MSG = 'Las acciones en grupo estarán disponibles muy pronto en la siguiente actualización de Lia. Por ahora puedo ayudarte de una en una — ¿quieres que empecemos?'
+const bulkBlockedMsg = (lang) => (idiomaDe(lang) === 'en'
+  ? "Group actions are coming soon to Lia. For now I can help you one at a time."
+  : 'Las acciones en grupo llegan muy pronto a Lia. Por ahora puedo ayudarte de una en una.')
 
 const isBulkAction = (message, intent) => {
   if (intent !== 'ACCION') return false
   return BULK_PATTERNS.some(pattern => pattern.test(message))
 }
 
+// Red de seguridad para lo que el regex no ve: si el modelo propone más de
+// esto en un solo turno, se descartan las propuestas y se responde el aviso.
+const MAX_ACCIONES_POR_TURNO = 3
+
+const UI_ACTION_TYPES = ['filter_guests', 'filter_by_state', 'open_guest_form', 'open_guest_detail']
+const GUEST_TAB_STATES = ['creado', 'esperando', 'confirmado', 'rechazado']
+
 // ------------------------------------------------------------
 // SALUDO ENRIQUECIDO — construye greeting con datos en paralelo
 // ------------------------------------------------------------
 
-const buildGreeting = async (invitation_id) => {
+const buildGreeting = async (invitation_id, lang) => {
+  const en = idiomaDe(lang) === 'en'
   const [
     { data: eventSummary },
     { data: unreadMessages },
@@ -718,17 +607,18 @@ const buildGreeting = async (invitation_id) => {
 
   const ownerNames = (event.owners || []).filter(Boolean).join(' y ')
 
-  const daysToEvent = event.event_date
-    ? Math.ceil((new Date(event.event_date) - new Date()) / (1000 * 60 * 60 * 24))
-    : null
+  // Días de calendario en CDMX (event_date es hora "de pared": no se convierte)
+  const diaEvento   = diaDeCalendario(event.event_date)
+  const daysToEvent = diaEvento ? diasEntre(hoyEnMexico(), diaEvento) : null
+  const evento      = tipoDeEvento(event.label, 'es')
 
   // Time-based greeting (Mexico City timezone)
   const nowMX = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }))
   const hour  = nowMX.getHours()
 
-  const morningOptions   = ['¡Buenos días!', 'Buen día ☀️', '¡Buenos días, aquí estoy!']
-  const afternoonOptions = ['¡Buenas tardes!', 'Buenas tardes ✨', '¡Hola! Buenas tardes']
-  const eveningOptions   = ['¡Buenas noches!', 'Buenas noches 🌙', '¡Hola! Buenas noches']
+  const morningOptions   = en ? ['Good morning!', 'Good morning ☀️'] : ['¡Buenos días!', 'Buen día ☀️', '¡Buenos días, aquí estoy!']
+  const afternoonOptions = en ? ['Good afternoon!', 'Good afternoon ✨'] : ['¡Buenas tardes!', 'Buenas tardes ✨']
+  const eveningOptions   = en ? ['Good evening!', 'Good evening 🌙'] : ['¡Buenas noches!', 'Buenas noches 🌙']
 
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 
@@ -739,23 +629,24 @@ const buildGreeting = async (invitation_id) => {
     : pick(eveningOptions)
 
   // greeting_text — solo el saludo personal, sin datos
-  const greetingText = ownerNames
-    ? `¡Hola ${ownerNames}! ${timeGreeting} 👋`
-    : `¡Hola! ${timeGreeting} 👋`
+  const names = en ? (event.owners || []).filter(Boolean).join(' & ') : ownerNames
+  const greetingText = names
+    ? `${en ? 'Hi' : '¡Hola'} ${names}! ${timeGreeting} 👋`
+    : `${timeGreeting} 👋`
 
   // summary — los datos del evento como bullets
   let summary = ''
 
   if (daysToEvent !== null) {
     if (daysToEvent > 30) {
-      summary += `📅 Faltan **${daysToEvent} días** para la boda.\n`
+      summary += `📅 Faltan **${daysToEvent} días** para ${event.label === 'xv' ? 'los' : 'el'} ${evento}.\n`
     } else if (daysToEvent > 7) {
       summary += `📅 ¡Ya están muy cerca! Faltan **${daysToEvent} días**.\n`
     } else if (daysToEvent > 1) {
-      summary += `🎊 ¡La boda es en **${daysToEvent} días**!\n`
+      summary += `🎊 ¡Faltan **${daysToEvent} días**!\n`
     } else if (daysToEvent === 1) {
       summary += `🎊 ¡**Mañana es el gran día**!\n`
-    } else {
+    } else if (daysToEvent === 0) {
       summary += `🎊 ¡**Hoy es el gran día**!\n`
     }
   }
@@ -813,18 +704,22 @@ const buildGreeting = async (invitation_id) => {
 // Saludo proactivo al abrir el chat — no consume crédito
 // ------------------------------------------------------------
 
-router.post('/greeting', async (req, res) => {
-  const { invitation_id } = req.body
+router.post('/greeting', validarAccesoInvitacion, async (req, res) => {
+  const { invitation_id, lang } = req.body
 
   if (!invitation_id) {
     return res.status(400).json({ success: false, error: 'invitation_id requerido' })
   }
 
   try {
-    const { greeting_text, summary, eventSummary, credits_remaining, alerts } = await buildGreeting(invitation_id)
+    const [{ greeting_text, summary, eventSummary, credits_remaining, alerts }, liaIncluded] = await Promise.all([
+      buildGreeting(invitation_id, lang),
+      planIncluyeLia(req.invitation?.plan),
+    ])
 
     res.json({
       success:           true,
+      lia_included:      liaIncluded,
       greeting_text,
       summary,
       alerts,
@@ -832,7 +727,8 @@ router.post('/greeting', async (req, res) => {
       event_summary:     eventSummary,
     })
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message })
+    console.error('[greeting] error:', err.message)
+    res.status(500).json({ success: false, error: 'No se pudo cargar el saludo' })
   }
 })
 
@@ -840,18 +736,28 @@ router.post('/greeting', async (req, res) => {
 // POST /api/ai/chat — con streaming SSE
 // ------------------------------------------------------------
 
-router.post('/chat', async (req, res) => {
-  const { invitation_id, message, session_id, stream = true, conversation_history } = req.body
+router.post('/chat', validarAccesoInvitacion, async (req, res) => {
+  const { invitation_id, message, session_id, stream = true, conversation_history, lang } = req.body
 
   if (!invitation_id || !message) {
     return res.status(400).json({ success: false, error: 'invitation_id y message son requeridos' })
   }
 
+  // 0. Lia solo en planes que la incluyen (antes el candado era solo visual)
+  if (!(await planIncluyeLia(req.invitation?.plan))) {
+    return res.status(403).json({ success: false, code: 'NOT_AVAILABLE', error: 'Lia no está incluida en el plan de este evento' })
+  }
+
   // 1. Verificar que hay créditos disponibles (sin descontar aún)
-  const { data: statusData } = await supabase
+  const { data: statusData, error: statusError } = await supabase
     .rpc('get_lia_credits_status', { p_invitation_id: invitation_id })
 
-  if (!statusData || statusData.total_available <= 0) {
+  if (statusError || !statusData) {
+    console.error('[chat] get_lia_credits_status falló:', statusError?.message)
+    return res.status(500).json({ success: false, error: 'No se pudo revisar el saldo de Lia' })
+  }
+
+  if (statusData.total_available <= 0) {
     return res.status(402).json({
       success:   false,
       code:      'NO_CREDITS',
@@ -862,101 +768,42 @@ router.post('/chat', async (req, res) => {
 
   try {
     // 2. Historial enviado por el frontend (últimos 6 registros)
-    const historyMessages = (conversation_history || [])
+    // El historial lo manda el cliente: solo user/assistant (un role "system"
+    // falso pasaría tal cual a GPT) y con texto acotado.
+    const historyMessages = (Array.isArray(conversation_history) ? conversation_history : [])
+      .filter((m) => (m?.role === 'user' || m?.role === 'assistant') && typeof m.content === 'string')
       .slice(-6)
-      .map((m) => ({ role: m.role, content: String(m.content) }))
+      .map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }))
 
     // 3. Obtener contexto del evento
     const { data: eventSummary } = await supabase
       .rpc('get_event_summary', { p_invitation_id: invitation_id })
 
-    // Detectar qué está esperando Lia en base al último mensaje del assistant
-    const lastAssistantMsg = historyMessages
-      .filter((m) => m.role === 'assistant')
-      .at(-1)?.content || ''
-
-    const waitingForTableName    = lastAssistantMsg.includes('llamar a esta mesa')
-    const waitingForTableShape   = lastAssistantMsg.includes('forma')
-    const waitingForTableSize    = lastAssistantMsg.includes('cuántas personas') || lastAssistantMsg.includes('para cuántas')
-    const waitingForOrientation  = lastAssistantMsg.includes('vertical') && lastAssistantMsg.includes('horizontal')
-    const waitingConfirmation    = lastAssistantMsg.includes('¿Confirmas') || lastAssistantMsg.includes('¿confirmas')
-
-    const userConfirming = /^(s[ií]|confirmo?|confirmas?|ok|dale|listo|adelante|hazlo)$/i.test(message.trim())
-
-    let actionContext = ''
-
-    if (waitingForTableName) {
-      actionContext = `
-CONTEXTO CRÍTICO: Estás en medio de crear una mesa.
-Acabas de preguntar "¿Cómo quieres llamar a esta mesa?"
-El usuario acaba de responder: "${message}"
-ESO ES EL NOMBRE DE LA MESA — no lo interpretes como otra cosa.
-Ahora pregunta la forma: "¿Qué forma tendrá? Redonda, cuadrada o rectangular"
-NO busques invitados, NO hagas otra consulta, NO cambies de tema.
-`
-    } else if (waitingForTableShape) {
-      const userMsgs = historyMessages
-        .filter(m => m.role === 'user')
-        .map(m => m.content)
-      actionContext = `
-CONTEXTO CRÍTICO: El usuario acaba de especificar la forma: "${message}"
-Mensajes previos del usuario en esta acción: ${JSON.stringify(userMsgs)}
-
-Ya tienes los 3 datos obligatorios. LLAMA INMEDIATAMENTE create_table
-con los datos extraídos del historial — NO preguntes nada más ni
-propongas en texto. La tool genera la pending_action automáticamente.
-
-Si la forma es "rectangle" y no tienes orientación, entonces sí
-pregunta: "¿Vertical u horizontal?"
-`
-    } else if (waitingForTableSize) {
-      actionContext = `
-CONTEXTO CRÍTICO: Estás en medio de crear una mesa.
-El usuario acaba de especificar la capacidad: "${message}"
-Continúa con el flujo de creación de mesa.
-`
-    } else if (waitingForOrientation) {
-      const userMsgs = historyMessages
-        .filter(m => m.role === 'user')
-        .map(m => m.content)
-      actionContext = `
-CONTEXTO CRÍTICO: Estás completando la creación de una mesa rectangular.
-La orientación especificada es: "${message}"
-Mensajes previos del usuario en esta acción: ${JSON.stringify(userMsgs)}
-Extrae nombre, capacidad y orientación de esos mensajes y llama
-create_table inmediatamente con todos los datos.
-`
-    } else if (waitingConfirmation && userConfirming) {
-      actionContext = `
-CONTEXTO CRÍTICO: El usuario acaba de confirmar la acción que propusiste.
-Debes llamar INMEDIATAMENTE la tool correspondiente (create_table,
-update_guest_state, assign_guest_table, etc.) con los datos que
-ya recolectaste en esta conversación.
-NO preguntes nada más — ejecuta la tool ahora.
-`
-    }
-
-    const systemPrompt = buildSystemPrompt(eventSummary) + (actionContext ? '\n' + actionContext : '')
+    // Antes aquí había heurísticas por substring ("forma", "¿Confirmas?") que
+    // metían el mensaje del usuario dentro del system prompt. El flujo de crear
+    // mesa y el "sí" después de una propuesta ya están como reglas fijas del
+    // prompt (models/lia.prompt.js), y el modelo ve el historial.
+    const systemPrompt = buildSystemPrompt(eventSummary, { lang })
     const currentMessages = [
       ...historyMessages,
       { role: 'user', content: message },
     ]
 
-    const cachedSystem = [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
-    const toolsWithCache = LIA_TOOLS.map((tool, i) =>
-      i === LIA_TOOLS.length - 1 ? { ...tool, cache_control: { type: 'ephemeral' } } : tool
-    )
-
     // ---- STREAMING ----
     if (stream) {
-      res.setHeader('Content-Type',                'text/event-stream')
-      res.setHeader('Cache-Control',               'no-cache')
-      res.setHeader('Connection',                  'keep-alive')
-      res.setHeader('Access-Control-Allow-Origin', '*')
+      res.setHeader('Content-Type',  'text/event-stream')
+      res.setHeader('Cache-Control', 'no-cache')
+      res.setHeader('Connection',    'keep-alive')
+      res.flushHeaders()
+
+      // Si el organizador cierra el chat, se corta la llamada al modelo.
+      const abort = new AbortController()
+      res.on('close', () => { if (!res.writableFinished) abort.abort() })
 
       let   fullContent    = ''
       let   totalTokensIn  = 0
       let   totalTokensOut = 0
+      let   modelUsed      = AI_MODELS.SONNET
       const toolsCalled    = []
       const pendingActions = []
       const uiActions      = []
@@ -971,11 +818,9 @@ NO preguntes nada más — ejecuta la tool ahora.
           const currentSessionId = toUuidSession(session_id, invitation_id)
           await supabase.from('ai_conversations').insert([
             { invitation_id, session_id: currentSessionId, role: 'user',      content: message },
-            { invitation_id, session_id: currentSessionId, role: 'assistant', content: BULK_BLOCKED_MSG, model_used: 'blocked' },
+            { invitation_id, session_id: currentSessionId, role: 'assistant', content: bulkBlockedMsg(lang), model_used: 'blocked' },
           ])
-          for (const word of BULK_BLOCKED_MSG.split(' ')) {
-            res.write(`data: ${JSON.stringify({ type: 'text', text: word + ' ' })}\n\n`)
-          }
+          res.write(`data: ${JSON.stringify({ type: 'text', text: bulkBlockedMsg(lang) })}\n\n`)
           res.write(`data: ${JSON.stringify({ type: 'done', pending_actions: [], tools_called: [], credits_remaining: statusData?.total_available || 0, message_id: null })}\n\n`)
           res.end()
           return
@@ -1003,29 +848,35 @@ NO preguntes nada más — ejecuta la tool ahora.
           } else if (intent === 'ACCION') {
             result = await runGPTLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id)
           } else {
-            result = await runSonnetStreamLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id, res)
+            result = await runSonnetStreamLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id, res, AI_MODELS.SONNET, abort.signal)
           }
         } catch (err) {
+          if (abort.signal.aborted) throw err
           console.error(`[chat/stream] ${intent} falló, escalando a Sonnet:`, err.message)
-          result = await runSonnetStreamLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id, res)
+          result = await runSonnetStreamLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id, res, AI_MODELS.SONNET, abort.signal)
         }
 
         fullContent    = result.content
         totalTokensIn  = result.tokensIn
         totalTokensOut = result.tokensOut
-        if (result.pendingActions?.length) pendingActions.push(...result.pendingActions)
+        modelUsed      = result.modelId
+        if (result.pendingActions?.length > MAX_ACCIONES_POR_TURNO) {
+          fullContent = bulkBlockedMsg(lang)
+        } else if (result.pendingActions?.length) {
+          pendingActions.push(...result.pendingActions)
+        }
 
-        // Para Gemini y GPT — simular streaming del texto
-        if (result.modelId !== AI_MODELS.SONNET && fullContent) {
-          const words = fullContent.split(' ')
-          for (const word of words) {
-            res.write(`data: ${JSON.stringify({ type: 'text', text: word + ' ' })}\n\n`)
-          }
+        // Gemini y GPT no se transmiten en vivo: su texto va en un solo evento.
+        // (Si se bloqueó por exceso de acciones, fullContent es el aviso.)
+        if ((result.modelId !== AI_MODELS.SONNET || fullContent !== result.content) && fullContent) {
+          if (fullContent !== result.content) res.write(`data: ${JSON.stringify({ type: 'replace', text: '' })}\n\n`)
+          res.write(`data: ${JSON.stringify({ type: 'text', text: fullContent })}\n\n`)
         }
 
       } catch (err) {
+        if (abort.signal.aborted) return
         console.error('[chat/stream] error fatal:', err.message)
-        res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`)
+        res.write(`data: ${JSON.stringify({ type: 'error', error: 'No se pudo responder' })}\n\n`)
         res.end()
         return
       }
@@ -1035,8 +886,8 @@ NO preguntes nada más — ejecuta la tool ahora.
       const { data: insertedConv, error: insertError } = await supabase
         .from('ai_conversations')
         .insert([
-          { invitation_id, session_id: currentSessionId, role: 'user',      content: message,      model_used: AI_MODELS.SONNET },
-          { invitation_id, session_id: currentSessionId, role: 'assistant', content: fullContent,   model_used: AI_MODELS.SONNET, tokens_in: totalTokensIn, tokens_out: totalTokensOut },
+          { invitation_id, session_id: currentSessionId, role: 'user',      content: message },
+          { invitation_id, session_id: currentSessionId, role: 'assistant', content: fullContent,   model_used: modelUsed, tokens_in: totalTokensIn, tokens_out: totalTokensOut },
         ])
         .select()
       if (insertError) console.error('Error guardando conversación:', insertError.message)
@@ -1060,10 +911,10 @@ NO preguntes nada más — ejecuta la tool ahora.
       }
 
       // Log
-      const costUsd = calculateCost(AI_MODELS.SONNET, totalTokensIn, totalTokensOut)
+      const costUsd = calculateCost(modelUsed, totalTokensIn, totalTokensOut)
       await supabase.rpc('log_ai_interaction', {
         p_invitation_id: invitation_id,
-        p_model:         AI_MODELS.SONNET,
+        p_model:         modelUsed,
         p_tokens_in:     totalTokensIn,
         p_tokens_out:    totalTokensOut,
         p_cost_usd:      costUsd,
@@ -1091,14 +942,15 @@ NO preguntes nada más — ejecuta la tool ahora.
       return
     }
 
-    // ---- SIN STREAMING (fallback) ----
-    if (isBulkAction(message, 'ACCION')) {
+    // ---- SIN STREAMING (el que usa el dashboard) ----
+    const intent = await classifyIntent(message, historyMessages)
+    if (isBulkAction(message, intent)) {
       const currentSessionId = toUuidSession(session_id, invitation_id)
       await supabase.from('ai_conversations').insert([
         { invitation_id, session_id: currentSessionId, role: 'user',      content: message },
-        { invitation_id, session_id: currentSessionId, role: 'assistant', content: BULK_BLOCKED_MSG, model_used: 'blocked' },
+        { invitation_id, session_id: currentSessionId, role: 'assistant', content: bulkBlockedMsg(lang), model_used: 'blocked' },
       ])
-      return res.json({ success: true, message: BULK_BLOCKED_MSG, blocked: true })
+      return res.json({ success: true, message: bulkBlockedMsg(lang), blocked: true })
     }
 
     const result = await orchestrate({
@@ -1108,10 +960,15 @@ NO preguntes nada más — ejecuta la tool ahora.
       systemPrompt,
       tools:        LIA_TOOLS,
       executeTool,
+      intent,
     })
 
+    if (result.pendingActions.length > MAX_ACCIONES_POR_TURNO) {
+      result.content        = bulkBlockedMsg(lang)
+      result.pendingActions = []
+    }
+
     const currentSessionId = toUuidSession(session_id, invitation_id)
-    console.log('INSERT ai_conversations:', { invitation_id, session_id: currentSessionId, content_length: result.content?.length })
     const { data: insertedConv, error: convError } = await supabase
       .from('ai_conversations')
       .insert([
@@ -1119,11 +976,7 @@ NO preguntes nada más — ejecuta la tool ahora.
         { invitation_id, session_id: currentSessionId, role: 'assistant', content: result.content, model_used: result.modelUsed, tokens_in: result.tokensIn, tokens_out: result.tokensOut },
       ])
       .select()
-    if (convError) {
-      console.error('ERROR INSERT ai_conversations:', convError)
-    } else {
-      console.log('ai_conversations OK — filas:', insertedConv?.length)
-    }
+    if (convError) console.error('ERROR INSERT ai_conversations:', convError)
 
     let savedActions = []
     if (result.pendingActions.length > 0) {
@@ -1165,6 +1018,7 @@ NO preguntes nada más — ejecuta la tool ahora.
       pct_free_used:     creditData?.pct_free_used   || 0,
       paid_balance:      creditData?.paid_balance     || 0,
       pending_actions:   savedActions,
+      ui_actions:        result.uiActions,
       tools_called:      result.toolsCalled,
       message_id:        assistantMessageId,
     })
@@ -1183,9 +1037,9 @@ NO preguntes nada más — ejecuta la tool ahora.
     })
 
     if (!res.headersSent) {
-      res.status(500).json({ success: false, error: err.message })
-    } else {
-      res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`)
+      res.status(500).json({ success: false, error: 'No se pudo responder' })
+    } else if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: 'No se pudo responder' })}\n\n`)
       res.end()
     }
   }
@@ -1195,7 +1049,7 @@ NO preguntes nada más — ejecuta la tool ahora.
 // POST /api/ai/chat/approve — Aprobar acción pendiente
 // ------------------------------------------------------------
 
-router.post('/chat/approve', async (req, res) => {
+router.post('/chat/approve', validarAccesoInvitacion, async (req, res) => {
   const { action_id, invitation_id } = req.body
 
   if (!action_id || !invitation_id) {
@@ -1203,16 +1057,48 @@ router.post('/chat/approve', async (req, res) => {
   }
 
   try {
+    // Se reclama la acción de forma atómica (pending → executed en un solo
+    // UPDATE condicional): con dos clics o dos pestañas, solo una petición
+    // la obtiene y la otra recibe 404. Si la ejecución falla, pasa a failed.
     const { data: action, error } = await supabase
       .from('ai_pending_actions')
-      .select('*')
+      .update({ status: 'executed', executed_at: new Date().toISOString() })
       .eq('id', action_id)
       .eq('invitation_id', invitation_id)
       .eq('status', 'pending')
-      .single()
+      .select('*')
+      .maybeSingle()
 
     if (error || !action) {
       return res.status(404).json({ success: false, error: 'Acción no encontrada o ya procesada' })
+    }
+
+    // Se vuelve a comprobar al ejecutar: las RPCs de invitados reciben solo el
+    // id del invitado, y puede haber acciones pendientes de antes de validar
+    // la pertenencia al proponerlas.
+    const guestId = action.payload?.guest_id
+    const ajeno =
+      (['update_guest_state', 'assign_guest_table'].includes(action.action_type)
+        && !(await guestDeLaInvitacion(guestId, invitation_id)))
+      || (action.action_type === 'update_side_event_guest_state'
+        && !(await sideGuestDeLaInvitacion(guestId, invitation_id)))
+
+    if (ajeno) {
+      await supabase.from('ai_pending_actions').update({ status: 'failed' }).eq('id', action_id)
+      return res.status(403).json({ success: false, error: 'Ese invitado no pertenece a este evento' })
+    }
+
+    if (action.action_type === 'assign_guest_table') {
+      const { data: mesa } = await supabase
+        .from('tables')
+        .select('id')
+        .eq('id', action.payload.table_id)
+        .eq('invitation_id', invitation_id)
+        .maybeSingle()
+      if (!mesa) {
+        await supabase.from('ai_pending_actions').update({ status: 'failed' }).eq('id', action_id)
+        return res.status(403).json({ success: false, error: 'Esa mesa no pertenece a este evento' })
+      }
     }
 
     let executeResult
@@ -1280,18 +1166,15 @@ router.post('/chat/approve', async (req, res) => {
         break
       }
       default:
+        await supabase.from('ai_pending_actions').update({ status: 'failed' }).eq('id', action_id)
         return res.status(400).json({ success: false, error: `Acción no soportada: ${action.action_type}` })
     }
 
-    await supabase
-      .from('ai_pending_actions')
-      .update({ status: 'executed', executed_at: new Date().toISOString() })
-      .eq('id', action_id)
-
     res.json({ success: true, result: executeResult })
   } catch (err) {
+    console.error('[chat/approve] error:', err.message)
     await supabase.from('ai_pending_actions').update({ status: 'failed' }).eq('id', action_id)
-    res.status(500).json({ success: false, error: err.message })
+    res.status(500).json({ success: false, error: 'No se pudo ejecutar la acción' })
   }
 })
 
@@ -1299,9 +1182,14 @@ router.post('/chat/approve', async (req, res) => {
 // POST /api/ai/chat/reject — Rechazar acción pendiente
 // ------------------------------------------------------------
 
-router.post('/chat/reject', async (req, res) => {
-  const { action_id } = req.body
-  await supabase.from('ai_pending_actions').update({ status: 'rejected' }).eq('id', action_id)
+router.post('/chat/reject', validarAccesoInvitacion, async (req, res) => {
+  const { action_id, invitation_id } = req.body
+  await supabase
+    .from('ai_pending_actions')
+    .update({ status: 'rejected' })
+    .eq('id', action_id)
+    .eq('invitation_id', invitation_id)
+    .eq('status', 'pending')
   res.json({ success: true })
 })
 
@@ -1309,8 +1197,8 @@ router.post('/chat/reject', async (req, res) => {
 // POST /api/ai/chat/feedback — Calificación de respuesta
 // ------------------------------------------------------------
 
-router.post('/chat/feedback', async (req, res) => {
-  const { message_id, feedback, note } = req.body
+router.post('/chat/feedback', validarAccesoInvitacion, async (req, res) => {
+  const { message_id, feedback, note, invitation_id } = req.body
 
   if (!message_id || !feedback) {
     return res.status(400).json({
@@ -1320,6 +1208,14 @@ router.post('/chat/feedback', async (req, res) => {
   }
 
   try {
+    const { data: mensaje } = await supabase
+      .from('ai_conversations')
+      .select('id')
+      .eq('id', message_id)
+      .eq('invitation_id', invitation_id)
+      .maybeSingle()
+    if (!mensaje) return res.status(404).json({ success: false, error: 'Mensaje no encontrado' })
+
     const { data, error } = await supabase
       .rpc('submit_message_feedback', {
         p_message_id: message_id,
@@ -1338,14 +1234,22 @@ router.post('/chat/feedback', async (req, res) => {
 // POST /api/ai/chat/action-feedback — Calificación de acción ejecutada
 // ------------------------------------------------------------
 
-router.post('/chat/action-feedback', async (req, res) => {
-  const { action_id, feedback, note } = req.body
+router.post('/chat/action-feedback', validarAccesoInvitacion, async (req, res) => {
+  const { action_id, feedback, note, invitation_id } = req.body
 
   if (!action_id || !feedback) {
     return res.status(400).json({ success: false, error: 'action_id y feedback son requeridos' })
   }
 
   try {
+    const { data: accion } = await supabase
+      .from('ai_pending_actions')
+      .select('id')
+      .eq('id', action_id)
+      .eq('invitation_id', invitation_id)
+      .maybeSingle()
+    if (!accion) return res.status(404).json({ success: false, error: 'Acción no encontrada' })
+
     const { data, error } = await supabase
       .rpc('submit_action_feedback', {
         p_action_id: action_id,
@@ -1364,89 +1268,175 @@ router.post('/chat/action-feedback', async (req, res) => {
 // Solo info pública del evento. Sin créditos ni tools admin.
 // ------------------------------------------------------------
 
-const GUEST_TOOLS = [
-  {
-    name: 'get_event_details',
-    description: 'Obtiene los detalles públicos del evento: itinerario, horarios, ubicaciones con links de Maps, dress code, avisos, hoteles sugeridos y mesa de regalos.',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  },
-]
+// Los datos públicos del evento (get_event_details) van directo en el prompt:
+// antes eran una tool, y cada pregunta costaba dos llamadas al modelo (una
+// para pedir la tool y otra para responder). Se cachean un minuto por
+// invitación porque muchos invitados preguntan casi al mismo tiempo.
+const DETALLES_CACHE_MS = 60 * 1000
+const detallesCache = new Map()
 
-const buildGuestSystemPrompt = (guestName) => `
-Eres Lia, la asistente de invitados del evento. Eres cálida, amigable y concisa.
-Por defecto hablas en español con un tono cercano pero profesional, pero SIEMPRE
-respondes en el mismo idioma en el que te escribe el invitado (inglés, portugués,
-etc. según corresponda), manteniendo ese mismo tono cálido en ese idioma.
-${guestName ? `El invitado se llama ${guestName}.` : ''}
+const detallesDelEvento = async (invitationId) => {
+  const guardado = detallesCache.get(invitationId)
+  if (guardado && Date.now() - guardado.at < DETALLES_CACHE_MS) return guardado.data
+  const { data, error } = await supabase.rpc('get_event_details', { p_invitation_id: invitationId })
+  if (error) throw error
+  detallesCache.set(invitationId, { data, at: Date.now() })
+  if (detallesCache.size > 500) detallesCache.delete(detallesCache.keys().next().value)
+  return data
+}
 
-INFORMACIÓN QUE PUEDES COMPARTIR:
-- Horarios e itinerario del evento
-- Ubicaciones y cómo llegar (incluye links de Maps cuando los haya)
-- Dress code / vestimenta recomendada
-- Mesa de regalos o sugerencias de regalo
-- Avisos generales para los invitados
-- Hoteles sugeridos y opciones de alojamiento cercanas
-- Quiénes son los novios y personas importantes del evento
+// Límites del chat de invitados. Es público (el invitado no tiene sesión), así
+// que el costo se contiene aquí: tamaño de lo que se manda al modelo, ráfagas
+// por IP y un tope diario por invitación contado en la base.
+const GUEST_LIMITES = {
+  mensajeMax:      500,   // caracteres del mensaje nuevo
+  historialTurnos: 10,    // mensajes previos que se reenvían al modelo
+  turnoMax:        2000,  // caracteres por mensaje del historial
+  nombreMax:       60,
+  diarioPorInvitacion: 300,
+}
+const GUEST_TOOL_LOG = 'guest_chat'  // marca en ai_agent_logs.tool_called
+const limiteGuestIp = crearLimite({ max: 20, ventanaMs: 10 * 60 * 1000 })
 
-INFORMACIÓN QUE NO DEBES COMPARTIR NUNCA:
-- Lista de invitados ni si alguien confirmó o no
-- Acomodo de mesas o asignación de lugares
-- Mensajes privados ni conversaciones
-- Información de contacto de otros invitados
-- Detalles operativos internos del organizador
+// El historial lo arma el cliente: solo user/assistant con texto plano,
+// recortado, empezando por user y sin dos turnos seguidos del mismo rol
+// (la API de Anthropic los exige alternados).
+const limpiarHistorialGuest = (historial) => {
+  const turnos = (Array.isArray(historial) ? historial : [])
+    .filter(m => (m?.role === 'user' || m?.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+    .slice(-GUEST_LIMITES.historialTurnos)
+    .map(m => ({ role: m.role, content: m.content.slice(0, GUEST_LIMITES.turnoMax) }))
 
-Si te preguntan algo que no puedes responder, redirige amablemente hacia lo que sí puedes ayudar.
-Usa get_event_details cuando necesites información del evento. Sé breve y útil.
-`
+  while (turnos.length && turnos[0].role !== 'user') turnos.shift()
+
+  return turnos.reduce((acc, m) => {
+    const previo = acc[acc.length - 1]
+    if (previo?.role === m.role) previo.content += `\n\n${m.content}`
+    else acc.push({ ...m })
+    return acc
+  }, [])
+}
+
+const limpiarNombreGuest = (nombre) => (typeof nombre === 'string'
+  ? nombre.replace(/[\u0000-\u001f"`\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, GUEST_LIMITES.nombreMax)
+  : '')
+
+// Lia para invitados solo existe en invitaciones activas cuyo plan la incluye
+// (feature `lia` en plans.features, editable en Admin → Planes).
+// Devuelve la invitación (label, event_date) o null si Lia no aplica.
+const invitacionConLiaGuest = async (invitationId) => {
+  const { data: inv } = await supabase
+    .from('invitations')
+    .select('id, plan, active, label, event_date')
+    .eq('id', invitationId)
+    .maybeSingle()
+  if (!inv?.active) return null
+  return (await planIncluyeLia(inv.plan)) ? inv : null
+}
+
+const usoGuestDeHoy = async (invitationId) => {
+  const inicioDelDia = new Date()
+  inicioDelDia.setUTCHours(0, 0, 0, 0)
+  const { count, error } = await supabase
+    .from('ai_agent_logs')
+    .select('id', { count: 'exact', head: true })
+    .eq('invitation_id', invitationId)
+    .like('tool_called', `${GUEST_TOOL_LOG}%`)
+    .gte('created_at', inicioDelDia.toISOString())
+  if (error) throw error
+  return count || 0
+}
 
 router.post('/guest-chat', async (req, res) => {
-  const { invitation_id, message, guest_name, conversation_history } = req.body
+  const { invitation_id, message, guest_name, conversation_history, lang } = req.body
 
-  if (!invitation_id || !message) {
-    return res.status(400).json({ success: false, error: 'invitation_id y message son requeridos' })
+  if (!invitation_id || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ success: false, code: 'BAD_REQUEST', error: 'invitation_id y message son requeridos' })
+  }
+  if (!UUID_RE.test(invitation_id)) {
+    return res.status(400).json({ success: false, code: 'BAD_REQUEST', error: 'invitation_id no válido' })
+  }
+  if (message.length > GUEST_LIMITES.mensajeMax) {
+    return res.status(413).json({ success: false, code: 'MESSAGE_TOO_LONG', error: `El mensaje no puede pasar de ${GUEST_LIMITES.mensajeMax} caracteres` })
+  }
+  if (!limiteGuestIp(ipDe(req))) {
+    return res.status(429).json({ success: false, code: 'RATE_LIMITED', error: 'Demasiadas preguntas seguidas. Intenta en unos minutos.' })
   }
 
-  const historyMessages = (conversation_history || []).map(m => ({
-    role: m.role,
-    content: m.content,
-  }))
+  let invitacion, detalles
+  try {
+    invitacion = await invitacionConLiaGuest(invitation_id)
+    if (!invitacion) {
+      return res.status(403).json({ success: false, code: 'NOT_AVAILABLE', error: 'Lia no está disponible para este evento' })
+    }
+    if ((await usoGuestDeHoy(invitation_id)) >= GUEST_LIMITES.diarioPorInvitacion) {
+      return res.status(429).json({ success: false, code: 'DAILY_LIMIT', error: 'Lia ya respondió muchas preguntas hoy. Intenta mañana.' })
+    }
+    detalles = await detallesDelEvento(invitation_id)
+  } catch (err) {
+    console.error('[guest-chat] error al validar:', err.message)
+    return res.status(500).json({ success: false, code: 'SERVER_ERROR', error: 'No se pudo procesar la pregunta' })
+  }
 
-  const systemPrompt = buildGuestSystemPrompt(guest_name)
-  const currentMessages = [...historyMessages, { role: 'user', content: message }]
+  const systemPrompt = buildGuestSystemPrompt({ guestName: limpiarNombreGuest(guest_name), invitation: invitacion, details: detalles, lang: /^[a-z]{2}(-[A-Za-z]{2})?$/.test(String(lang || '')) ? lang : null })
+  const currentMessages = limpiarHistorialGuest([
+    ...(Array.isArray(conversation_history) ? conversation_history : []),
+    { role: 'user', content: message.trim() },
+  ])
 
-  res.setHeader('Content-Type',                'text/event-stream')
-  res.setHeader('Cache-Control',               'no-cache')
-  res.setHeader('Connection',                  'keep-alive')
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Content-Type',  'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection',    'keep-alive')
+  res.flushHeaders()
+
+  const abort = new AbortController()
+  res.on('close', () => { if (!res.writableFinished) abort.abort() })
+
+  const inicio = Date.now()
+  let result = null
+  let fallo = null
 
   try {
-    const result = await runSonnetStreamLoop(
+    // Sin tools: los datos ya van en el prompt.
+    result = await runSonnetStreamLoop(
       systemPrompt,
       currentMessages,
-      GUEST_TOOLS,
-      async (toolName, toolInput, invId) => {
-        if (toolName !== 'get_event_details') throw new Error(`Tool no permitida: ${toolName}`)
-        res.write(`data: ${JSON.stringify({ type: 'tool_start', tool: toolName })}\n\n`)
-        const { data, error } = await supabase.rpc('get_event_details', { p_invitation_id: invId })
-        if (error) throw error
-        res.write(`data: ${JSON.stringify({ type: 'tool_end', tool: toolName })}\n\n`)
-        return data
-      },
+      undefined,
+      async () => ({ error: 'Sin herramientas' }),
       invitation_id,
-      res
+      res,
+      AI_MODELS.HAIKU,
+      abort.signal
     )
 
-    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
-    res.end()
+    if (!res.destroyed && !res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+      res.end()
+    }
   } catch (err) {
-    console.error('[guest-chat] error:', err.message)
-    if (!res.headersSent) {
-      res.status(500).json({ success: false, error: err.message })
-    } else {
-      res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`)
+    fallo = err
+    if (!abort.signal.aborted) console.error('[guest-chat] error:', err.message)
+    if (!res.destroyed && !res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: 'No se pudo procesar la pregunta' })}\n\n`)
       res.end()
     }
   }
+
+  // Cada pregunta queda en ai_agent_logs, también las que fallan: de ahí sale
+  // el tope diario y el costo del chat de invitados en la analítica.
+  const tokensIn  = result?.tokensIn  || 0
+  const tokensOut = result?.tokensOut || 0
+  const { error: logError } = await supabase.rpc('log_ai_interaction', {
+    p_invitation_id: invitation_id,
+    p_model:         AI_MODELS.HAIKU,
+    p_tokens_in:     tokensIn,
+    p_tokens_out:    tokensOut,
+    p_cost_usd:      calculateCost(AI_MODELS.HAIKU, tokensIn, tokensOut),
+    p_tool_called:   GUEST_TOOL_LOG,
+    p_success:       !fallo && Boolean(result?.content),
+    p_duration_ms:   Date.now() - inicio,
+  })
+  if (logError) console.error('[guest-chat] no se pudo registrar el uso:', logError.message)
 })
 
 module.exports = router

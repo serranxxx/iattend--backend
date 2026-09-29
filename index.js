@@ -55,8 +55,6 @@ app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
 app.use('/drafts', express.static('drafts'));
 
-app.use('/api/ai/credits', require('./router/ai.credits.route'));
-
 app.post(
     "/api/payment/webhook",
     express.raw({ type: "application/json" }),
@@ -91,7 +89,8 @@ app.use(express.urlencoded({ extended: false }));
 
 // Rutas
 app.use('/api/auth', require('./router/auth'));
-app.use('/api/ai', require('./router/iattendai'));
+// Después de express.json(): /purchase es POST y necesita req.body.
+app.use('/api/ai/credits', require('./router/ai.credits.route'));
 app.use('/api/ai', require('./router/ai.chat.route'));
 app.use('/api/mail', require('./router/mailer'));
 app.use('/api/whats', require('./router/whatsapp'));
@@ -115,6 +114,7 @@ app.use('/api/admin', require('./router/adminGiftBrands'));
 app.use('/api/admin', require('./router/plans').adminRouter);
 app.use('/api/admin', require('./router/adminOnboarding'));
 app.use('/api/admin', require('./router/adminUsuarios'));
+app.use('/api/admin', require('./router/adminLia'));
 app.use('/api/admin', require('./router/supportTickets').adminRouter);
 app.use('/api/support', require('./router/supportTickets').publicRouter);
 app.use('/api/plans', require('./router/plans').publicRouter);

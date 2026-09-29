@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { updateInvitationActive, updateInvitationCredits, updateInvitationData, updateInvitationFields, AddNewOwner, RemoveOwnerByIndex, createInvitationFromPreview, setPlan } = require('../controllers/invitation');
 const { createInvitationWithPlan } = require('../controllers/supabase');
 const supabase = require('../config/supabase');
+const { validarAdmin } = require('../middlewares/validar-admin');
 
 
 const router = Router();
@@ -9,7 +10,9 @@ const router = Router();
 router.post('/create-from-preview', createInvitationFromPreview);
 router.patch('/set-plan', setPlan);
 router.patch('/update-active', updateInvitationActive);
-router.patch('/update-credits', updateInvitationCredits);
+// Solo Admin → Eventos recarga créditos a mano; sin esto cualquiera podía
+// fijar los créditos de cualquier invitación.
+router.patch('/update-credits', validarAdmin, updateInvitationCredits);
 router.patch('/update-data', updateInvitationData);
 router.patch('/update-fields', updateInvitationFields);
 router.patch('/add-owner', AddNewOwner);

@@ -49,6 +49,13 @@ async function getPlan(plan) {
  * Columnas que se copian a `invitations` al crear una invitación con este
  * plan. Un plan desconocido o nulo (borrador sin pagar) no incluye nada.
  */
+// Lia es una feature del plan (icon 'lia' en plans.features, editable en
+// Admin → Planes): así se decide quién la usa, no comparando con 'pro'.
+async function planIncluyeLia(plan) {
+    const found = await getPlan(plan);
+    return Boolean(found?.features?.some(f => f?.icon === 'lia'));
+}
+
 async function planEntitlements(plan) {
     const found = await getPlan(plan);
     const credits = found?.credits_included ?? 0;
@@ -77,6 +84,7 @@ module.exports = {
     getPlan,
     getPlanByPriceId,
     planEntitlements,
+    planIncluyeLia,
     invalidatePlansCache,
     normalizePlanId,
 };
