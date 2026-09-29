@@ -1,3 +1,4 @@
+const { registrarVentaEcommerce } = require('./ventasEcommerce');
 const supabase = require("../config/supabase");
 const { sendMail } = require("./mailer");
 const { giftEmailTemplate } = require("./templates/giftEmail");
@@ -56,14 +57,19 @@ async function createInvitationFromQueue(queueId, planName) {
     data: data || {},
   };
 
-  const { error: insertError } = await supabase.from("invitations").insert(payload);
+  const { data: creada, error: insertError } = await supabase
+    .from("invitations")
+    .insert(payload)
+    .select("id")
+    .single();
 
   if (insertError) {
     console.error("Error creando invitación desde queue:", insertError);
-    return;
+    return null;
   }
 
   await supabase.from("checkout_queue").delete().eq("id", queueId);
+  return creada?.id ?? null;
 }
 
 /**
@@ -89,13 +95,15 @@ async function processingPayment(session) {
 
   // Preview/checkout flow: create invitation from queued data after payment
   if (queueId && product.type === "plan") {
-    await createInvitationFromQueue(queueId, product.value);
+    const nuevaId = await createInvitationFromQueue(queueId, product.value);
+    await registrarVentaEcommerce({ invitationId: nuevaId, planName: product.value, session });
     return;
   }
 
   if (!invitationId && userId) {
     if (product.type === "plan") {
-      await createInvitationWithPlan(userId, product.value, session.metadata);
+      const nuevaId = await createInvitationWithPlan(userId, product.value, session.metadata);
+      await registrarVentaEcommerce({ invitationId: nuevaId, planName: product.value, session });
     }
     return;
   }
@@ -111,6 +119,7 @@ async function processingPayment(session) {
       break;
     case "plan":
       await activatePlan(invitationId, product.value);
+      await registrarVentaEcommerce({ invitationId, planName: product.value, session });
       break;
     default:
       break;

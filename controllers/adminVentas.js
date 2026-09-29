@@ -12,7 +12,7 @@ const listarVentas = async (req, res = response) => {
     try {
         let query = supabase
             .from('ventas')
-            .select('id, plan, precio_acordado, descuento_pct, fecha_venta, comision_monto, comision_pagada, vendedor_id, vendedores ( nombre ), invitations ( owners, label, name )')
+            .select('id, plan, precio_acordado, descuento_pct, fecha_venta, comision_monto, comision_pagada, vendedor_id, vendedores ( nombre, tipo ), invitations ( owners, label, name )')
             .order('fecha_venta', { ascending: false });
 
         if (vendedor_id) {
@@ -78,6 +78,8 @@ const listarVentas = async (req, res = response) => {
                 fecha_venta: v.fecha_venta,
                 vendedor_id: v.vendedor_id,
                 vendedor: v.vendedores?.nombre || '',
+                // 'ecommerce' = compra en línea con Stripe: no comisiona.
+                vendedor_tipo: v.vendedores?.tipo || null,
                 plan: v.plan,
                 precio_acordado: v.precio_acordado,
                 total_pagado: saldo.total_pagado ?? 0,
@@ -446,11 +448,15 @@ const editarVendedor = async (req, res = response) => {
         cambios.nombre = nombre.trim();
     }
 
+    // El vendedor Ecommerce lo crea la migración y no cambia de tipo; los demás
+    // no pueden volverse ecommerce. Reenviar el mismo tipo al editar sí se vale.
     if (tipo !== undefined) {
-        if (!TIPOS_VENDEDOR_VALIDOS.includes(tipo)) {
+        const { data: actual } = await supabase.from('vendedores').select('tipo').eq('id', vendedor_id).maybeSingle();
+        const sinCambio = actual?.tipo === tipo;
+        if (!sinCambio && (!TIPOS_VENDEDOR_VALIDOS.includes(tipo) || actual?.tipo === 'ecommerce')) {
             return res.status(400).json({ ok: false, msg: 'tipo debe ser interno o externo' });
         }
-        cambios.tipo = tipo;
+        if (!sinCambio) cambios.tipo = tipo;
     }
 
     if (telefono !== undefined) cambios.telefono = telefono || null;

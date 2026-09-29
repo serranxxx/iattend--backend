@@ -61,4 +61,29 @@ const editarUsuario = async (req, res = response) => {
     }
 };
 
-module.exports = { editarUsuario };
+// Cómo entra cada cuenta (Google, Apple o correo y contraseña). Vive en
+// auth.users, que el frontend no puede leer con la anon key.
+// GET /api/admin/usuarios/proveedores → { proveedores: { [user_id]: ['google'] } }
+const POR_PAGINA = 1000;
+
+const listarProveedores = async (req, res = response) => {
+    try {
+        const proveedores = {};
+        for (let page = 1; ; page++) {
+            const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: POR_PAGINA });
+            if (error) return res.status(500).json({ ok: false, msg: error.message });
+
+            (data?.users ?? []).forEach(u => {
+                const lista = u.app_metadata?.providers ?? (u.app_metadata?.provider ? [u.app_metadata.provider] : []);
+                proveedores[u.id] = lista;
+            });
+
+            if ((data?.users ?? []).length < POR_PAGINA) break;
+        }
+        return res.status(200).json({ ok: true, proveedores });
+    } catch (error) {
+        return res.status(500).json({ ok: false, msg: error.message || 'Internal Server Error' });
+    }
+};
+
+module.exports = { editarUsuario, listarProveedores };

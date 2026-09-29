@@ -5,10 +5,11 @@
 
 const { Router } = require('express');
 const { validarAdmin } = require('../middlewares/validar-admin');
-const { editarUsuario } = require('../controllers/adminUsuarios');
+const { editarUsuario, listarProveedores } = require('../controllers/adminUsuarios');
 
 const router = Router();
 
+router.get('/usuarios/proveedores', validarAdmin, listarProveedores);
 router.patch('/usuarios/:user_id', validarAdmin, editarUsuario);
 
 module.exports = router;
