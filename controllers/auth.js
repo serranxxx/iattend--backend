@@ -9,6 +9,33 @@ const { resolveAdminUserId } = require('../helpers/adminAuth');
 // Roles que el admin puede asignar al crear una cuenta. Sin rol = cliente.
 const ROLES_ASIGNABLES = ['Administration', 'sales', 'planner', 'mkt', 'test'];
 
+const PROVEEDORES = { google: 'Google', apple: 'Apple' };
+
+// Si el correo ya tiene cuenta, devuelve { code, providers, msg } para que el
+// registro explique cómo entrar (p. ej. "entraste con Apple"). null si no hay.
+const cuentaExistente = async (email) => {
+    const { data: perfil } = await supabase
+        .from('profiles')
+        .select('user_id')
+        .ilike('user_email', email.replace(/[%_\\]/g, '\\$&'))
+        .limit(1)
+        .maybeSingle();
+
+    if (!perfil?.user_id) return null;
+
+    const { data } = await supabase.auth.admin.getUserById(perfil.user_id);
+    const providers = (data?.user?.app_metadata?.providers ?? []).filter(p => PROVEEDORES[p]);
+    const nombres = providers.map(p => PROVEEDORES[p]);
+
+    return {
+        code: 'EMAIL_EXISTS',
+        providers,
+        msg: nombres.length
+            ? `Ya existe una cuenta con este correo. Entra con ${nombres.join(' o ')}.`
+            : 'Ya existe una cuenta con este correo. Inicia sesión.',
+    };
+};
+
 
 
 /** ********************************************
@@ -342,25 +369,12 @@ const createUser = async (req, res = response) => {
 
         Email = Email.toLowerCase();
 
-        const { data: existingUsers, error: fetchError } =
-            await supabase.auth.admin.listUsers();
-
-        if (fetchError) {
-            return res.status(500).json({
-                ok: false,
-                msg: fetchError.message
-            });
-        }
-
-        const alreadyExists = existingUsers.users.find(
-            user => user.email === Email
-        );
-
-        if (alreadyExists) {
-            return res.status(400).json({
-                ok: false,
-                msg: 'Email already exists'
-            });
+        // ¿Ya hay cuenta con este correo? Se busca directo en profiles (cada
+        // cuenta tiene el suyo) en vez de con auth.admin.listUsers(), que solo
+        // regresa la primera página de 50 usuarios y dejaba pasar al resto.
+        const existente = await cuentaExistente(Email);
+        if (existente) {
+            return res.status(409).json({ ok: false, ...existente });
         }
 
         // 2️⃣ Crear usuario en Supabase Auth
@@ -373,6 +387,10 @@ const createUser = async (req, res = response) => {
 
 
         if (error) {
+            // Respaldo: una cuenta en auth.users sin fila en profiles.
+            if (error.code === 'email_exists' || /already (been )?registered/i.test(error.message)) {
+                return res.status(409).json({ ok: false, code: 'EMAIL_EXISTS', providers: [], msg: 'Ya existe una cuenta con este correo.' });
+            }
             return res.status(400).json({
                 ok: false,
                 msg: error.message

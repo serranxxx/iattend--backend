@@ -114,6 +114,9 @@ app.use('/api/admin', require('./router/adminGastosFijos'));
 app.use('/api/admin', require('./router/adminGiftBrands'));
 app.use('/api/admin', require('./router/plans').adminRouter);
 app.use('/api/admin', require('./router/adminOnboarding'));
+app.use('/api/admin', require('./router/adminUsuarios'));
+app.use('/api/admin', require('./router/supportTickets').adminRouter);
+app.use('/api/support', require('./router/supportTickets').publicRouter);
 app.use('/api/plans', require('./router/plans').publicRouter);
 app.use('/api/configuracion-pagos', require('./router/configuracionPagos'));
 

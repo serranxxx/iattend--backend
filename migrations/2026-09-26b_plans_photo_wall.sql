@@ -17,5 +17,7 @@ update public.plans set photo_wall_included = (id = 'pro');
 alter table public.invitations
   add column if not exists photo_wall_included boolean not null default false;
 
--- Reglas vigentes hasta hoy: solo PRO lo tenía.
-update public.invitations set photo_wall_included = (lower(plan) = 'pro');
+-- Reglas vigentes hasta hoy: solo PRO lo tenía. Hay invitaciones con plan
+-- NULL: lower(NULL) = 'pro' da NULL y la columna es NOT NULL, de ahí el
+-- coalesce.
+update public.invitations set photo_wall_included = coalesce(lower(plan) = 'pro', false);

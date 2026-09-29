@@ -404,8 +404,14 @@ async function processGiftPayment(metadata) {
   const giftCode = Math.floor(100000 + Math.random() * 900000).toString();
   const email = giftEmail.toLowerCase();
 
-  const { data: existingUsers } = await supabase.auth.admin.listUsers();
-  const alreadyExists = existingUsers?.users?.find(u => u.email === email);
+  // Directo en profiles: auth.admin.listUsers() solo trae los primeros 50.
+  const { data: perfilExistente } = await supabase
+    .from("profiles")
+    .select("user_id")
+    .ilike("user_email", email.replace(/[%_\\]/g, "\\$&"))
+    .limit(1)
+    .maybeSingle();
+  const alreadyExists = !!perfilExistente;
 
   if (!alreadyExists) {
     const { data, error } = await supabase.auth.admin.createUser({
