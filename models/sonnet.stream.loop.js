@@ -47,16 +47,20 @@ async function runSonnetStreamLoop(systemPrompt, messages, tools, executeTool, i
     finalText += texto
 
     if (response.stop_reason === 'tool_use') {
-      // Separa el texto previo a la tool del que viene después
-      if (texto && !res.writableEnded) res.write(`data: ${JSON.stringify({ type: 'text', text: '\n\n' })}\n\n`)
-      if (texto) finalText += '\n\n'
-
       const toolResults = []
+      const resultados  = []
       for (const toolUse of response.content.filter(b => b.type === 'tool_use')) {
         const result = await executeTool(toolUse.name, toolUse.input, invitationId)
+        resultados.push(result)
         if (result?.requires_confirmation) pendingActions.push(result)
         toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(result) })
       }
+      // Tools terminales (mostrar_bloque): no hace falta otra vuelta al modelo
+      if (resultados.length && resultados.every(r => r?.terminal)) break
+
+      // Separa el texto previo a la tool del que viene después
+      if (texto && !res.writableEnded) res.write(`data: ${JSON.stringify({ type: 'text', text: '\n\n' })}\n\n`)
+      if (texto) finalText += '\n\n'
       currentMsgs = [
         ...currentMsgs,
         { role: 'assistant', content: response.content },

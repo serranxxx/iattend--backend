@@ -22,7 +22,14 @@ CONSULTA_SIMPLE: preguntas que se responden con datos básicos del evento
   NO incluye: preguntas sobre mensajes de WhatsApp, historial de invitados,
   preguntas de seguimiento ("qué me dijo", "quién es", "cuéntame más")
 
-ACCION: peticiones que crean o modifican datos
+AYUDA: dudas sobre cómo usar la app I attend o dónde está algo, y reportes de
+  errores de la app. Aunque mencionen editar, cambiar o eliminar, si preguntan
+  CÓMO hacerlo ellos (no piden que Lia lo haga) es AYUDA.
+  Ejemplos: "cómo subo un excel", "dónde edito las mesas", "cómo elimino un side
+  event", "se puede cambiar el mensaje de bienvenida?", "dónde está el código
+  del link", "el link marca error", "la página se queda en blanco"
+
+ACCION: peticiones para que Lia cree o modifique datos
   Ejemplos: "confirma a Juan", "pon a María en mesa 3", "crea una mesa",
   "cambia el estado", "asigna", "agrega", "cambia la fecha"
 
@@ -52,7 +59,9 @@ async function classifyIntent(message, historyMessages = []) {
 
     const intent = result.response.text().trim().toUpperCase()
 
-    if (['CONSULTA_SIMPLE', 'ACCION', 'EMPATIA'].includes(intent)) {
+    // AYUDA va a Sonnet (el camino por defecto): la guía de uso es larga y
+    // GPT-4o-mini la contradecía ("no es posible cambiar la bienvenida").
+    if (['CONSULTA_SIMPLE', 'ACCION', 'EMPATIA', 'AYUDA'].includes(intent)) {
       return intent
     }
 
@@ -92,16 +101,25 @@ async function runSonnetLoop(systemPrompt, messages, tools, executeTool, invitat
     totalIn  += tokensDeEntradaAnthropic(response.usage)
     totalOut += response.usage.output_tokens
 
+    const texto = response.content.filter(b => b.type === 'text').map(b => b.text).join('')
+
     if (response.stop_reason !== 'tool_use') {
-      finalText = response.content.find(b => b.type === 'text')?.text || ''
+      finalText = texto
       break
     }
 
     const toolResults = []
+    const resultados  = []
     for (const toolUse of response.content.filter(b => b.type === 'tool_use')) {
       const result = await executeTool(toolUse.name, toolUse.input, invitationId)
+      resultados.push(result)
       if (result?.requires_confirmation) pendingActions.push(result)
       toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(result) })
+    }
+    // Tools terminales (mostrar_bloque): el texto de este turno es la respuesta
+    if (resultados.every(r => r?.terminal)) {
+      finalText = texto
+      break
     }
 
     currentMsgs = [
@@ -153,6 +171,7 @@ async function runGPTLoop(systemPrompt, messages, tools, executeTool, invitation
     // Ejecutar tools
     const assistantMsg = { role: 'assistant', content: choice.message.content || '', tool_calls: choice.message.tool_calls }
     const toolMsgs = []
+    const resultados = []
 
     for (const toolCall of choice.message.tool_calls) {
       // Si GPT manda argumentos que no son JSON, se le regresa el error a él
@@ -165,12 +184,18 @@ async function runGPTLoop(systemPrompt, messages, tools, executeTool, invitation
         continue
       }
       const result    = await executeTool(toolCall.function.name, toolInput, invitationId)
+      resultados.push(result)
       if (result?.requires_confirmation) pendingActions.push(result)
       toolMsgs.push({
         role:         'tool',
         tool_call_id: toolCall.id,
         content:      JSON.stringify(result),
       })
+    }
+
+    if (resultados.length && resultados.every(r => r?.terminal)) {
+      finalText = choice.message.content || ''
+      break
     }
 
     currentMsgs = [...currentMsgs, assistantMsg, ...toolMsgs]
@@ -233,8 +258,10 @@ async function runGeminiLoop(systemPrompt, messages, tools, executeTool, invitat
     // Ejecutar tools y devolver resultados
     // Gemini exige que response sea un objeto — los arrays se envuelven en { data: [...] }
     const fnResponses = []
+    const resultados  = []
     for (const fn of fnCalls) {
       const result = await executeTool(fn.name, fn.args, invitationId)
+      resultados.push(result)
       if (result?.requires_confirmation) pendingActions.push(result)
       fnResponses.push({
         functionResponse: {
@@ -242,6 +269,12 @@ async function runGeminiLoop(systemPrompt, messages, tools, executeTool, invitat
           response: Array.isArray(result) ? { data: result } : (result ?? {}),
         }
       })
+    }
+
+    if (resultados.every(r => r?.terminal)) {
+      // Gemini puede mandar texto junto con la llamada
+      finalText = response.candidates?.[0]?.content?.parts?.filter(p => p.text).map(p => p.text).join('') || ''
+      break
     }
 
     // En Gemini el siguiente mensaje son los resultados de las tools
@@ -276,13 +309,19 @@ async function orchestrate({
   // solo el último intento para no duplicarlas.
   let toolsCalled = []
   let uiActions   = []
+  let bloques     = []
+  let evidencias  = []
   const conTracking = () => {
     toolsCalled = []
     uiActions   = []
+    bloques     = []
+    evidencias  = []
     return async (toolName, toolInput, invId) => {
       const result = await executeTool(toolName, toolInput, invId)
       toolsCalled.push(toolName)
+      evidencias.push({ tool: toolName, input: toolInput, result })
       if (result?.requires_ui_action) uiActions.push(result.ui_action)
+      if (result?.bloque) bloques.push(result.bloque)
       return result
     }
   }
@@ -309,7 +348,8 @@ async function orchestrate({
   }
 
   // 3. Si el resultado está vacío, fallback a Sonnet
-  if (!result.content?.trim() && result.modelId !== AI_MODELS.SONNET) {
+  // (Una respuesta solo con bloques no está vacía.)
+  if (!result.content?.trim() && !bloques.length && result.modelId !== AI_MODELS.SONNET) {
     console.warn(`[orchestrate] respuesta vacía de ${result.modelId}, escalando a Sonnet`)
     costoPrevio += calculateCost(result.modelId, result.tokensIn, result.tokensOut)
     result = await runSonnetLoop(systemPrompt, messages, tools, conTracking(), invitationId)
@@ -324,6 +364,8 @@ async function orchestrate({
     costUsd:        costoPrevio + calculateCost(result.modelId, result.tokensIn, result.tokensOut),
     toolsCalled,
     uiActions,
+    bloques,
+    evidencias,
     pendingActions: result.pendingActions || [],
   }
 }
