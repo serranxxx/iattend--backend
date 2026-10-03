@@ -2,6 +2,7 @@ const { response } = require('express');
 const Stripe = require('stripe');
 const supabase = require('../config/supabase');
 const { getPlans, invalidatePlansCache } = require('../config/plans');
+const { installmentsFor } = require('../config/stripe.installments');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -27,8 +28,14 @@ const priceOf = async (priceId) => {
     }
 };
 
+// `installments`: plazos a meses sin intereses (precio total y mensualidad de
+// cada uno), resueltos por lookup_key en Stripe. [] si el plan no tiene MSI.
 const withPrices = (plans) => Promise.all(
-    plans.map(async (plan) => ({ ...plan, price: await priceOf(plan.stripe_price_id) }))
+    plans.map(async (plan) => ({
+        ...plan,
+        price: await priceOf(plan.stripe_price_id),
+        installments: await installmentsFor(plan.id),
+    }))
 );
 
 // Campos que ven los frontends. `updated_by` se queda en el admin.
