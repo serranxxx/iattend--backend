@@ -4,6 +4,8 @@ const { sendMail } = require("./mailer");
 const { giftEmailTemplate } = require("./templates/giftEmail");
 const { PRODUCTS } = require("../config/stripe.products");
 const { getPlan, getPlanByPriceId, planEntitlements } = require("../config/plans");
+const { installmentByPriceId } = require("../config/stripe.installments");
+const { revisarPlazoMSI } = require("./msiPlazo");
 
 /**
  * Guarda preview data en checkout_queue y devuelve el ID
@@ -88,22 +90,30 @@ async function processingPayment(session) {
   }
 
   // Price nuevo puesto desde Admin → Planes que todavía no está en
-  // stripe.products.js: se resuelve contra el catálogo.
+  // stripe.products.js: se resuelve contra el catálogo. Un price de meses sin
+  // intereses tampoco está ahí: se resuelve por su lookup_key.
   const catalogPlan = PRODUCTS[priceId] ? null : await getPlanByPriceId(priceId);
-  const product = PRODUCTS[priceId] || (catalogPlan && { type: "plan", value: catalogPlan.id });
+  const msiPlan = PRODUCTS[priceId] || catalogPlan ? null : await installmentByPriceId(priceId);
+  const product = PRODUCTS[priceId]
+    || (catalogPlan && { type: "plan", value: catalogPlan.id })
+    || (msiPlan && { type: "plan", value: msiPlan.planId });
   if (!product) return;
+
+  // Plazo cobrado vs. el del precio. Si no coincide el plan se activa igual
+  // (ya se cobró) y se manda a revisión.
+  const plazo = await revisarPlazoMSI(session);
 
   // Preview/checkout flow: create invitation from queued data after payment
   if (queueId && product.type === "plan") {
     const nuevaId = await createInvitationFromQueue(queueId, product.value);
-    await registrarVentaEcommerce({ invitationId: nuevaId, planName: product.value, session });
+    await registrarVentaEcommerce({ invitationId: nuevaId, planName: product.value, session, plazo });
     return;
   }
 
   if (!invitationId && userId) {
     if (product.type === "plan") {
       const nuevaId = await createInvitationWithPlan(userId, product.value, session.metadata);
-      await registrarVentaEcommerce({ invitationId: nuevaId, planName: product.value, session });
+      await registrarVentaEcommerce({ invitationId: nuevaId, planName: product.value, session, plazo });
     }
     return;
   }
@@ -119,7 +129,7 @@ async function processingPayment(session) {
       break;
     case "plan":
       await activatePlan(invitationId, product.value);
-      await registrarVentaEcommerce({ invitationId, planName: product.value, session });
+      await registrarVentaEcommerce({ invitationId, planName: product.value, session, plazo });
       break;
     default:
       break;

@@ -5,12 +5,31 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const { createInvitationWithPlan, createCheckoutQueue } = require("./supabase");
 const { PLAN_PRICES, PRODUCTS } = require("../config/stripe.products");
 const { getPlan, getPlanByPriceId } = require("../config/plans");
+const { resolveInstallmentLookupKey, installmentsOptions } = require("../config/stripe.installments");
 
 // Un price de plan es válido si está en la lista histórica o si es el que el
 // catálogo tiene hoy para algún plan (Admin → Planes puede cambiarlo).
 const esPrecioDePlan = async (priceId) =>
   PLAN_PRICES.includes(priceId) || Boolean(await getPlanByPriceId(priceId));
 const supabase = require("../config/supabase");
+
+// Precio a cobrar por un plan. Con `lookupKey` es un plazo a meses sin
+// intereses: el price sale de Stripe por su lookup_key (el cliente nunca manda
+// el price de MSI). Sin él es contado y el priceId tiene que ser de un plan.
+// Devuelve { priceId, months } o { error }.
+const resolverPrecioDePlan = async ({ priceId, lookupKey }) => {
+  if (lookupKey) {
+    const msi = await resolveInstallmentLookupKey(lookupKey);
+    if (!msi) return { error: "Plazo de meses sin intereses no válido" };
+    return { priceId: msi.priceId, months: msi.months, lookupKey };
+  }
+  if (!(await esPrecioDePlan(priceId))) return { error: "priceId no válido para un plan" };
+  return { priceId, months: 0 };
+};
+
+// Metadata del plazo: el webhook la compara con el plazo que de verdad se cobró.
+const metadataPlazo = ({ months, lookupKey }) =>
+  months ? { msiMonths: String(months), lookupKey } : {};
 
 /**
  * Crear sesión de Checkout
@@ -55,6 +74,7 @@ router.post("/create-checkout", async (req, res) => {
           quantity: 1,
         },
       ],
+      payment_method_options: installmentsOptions(0),
 
       metadata: {
         invitationId,
@@ -81,15 +101,15 @@ router.post("/create-checkout", async (req, res) => {
 
 router.post("/create-checkout-invitation", async (req, res) => {
   try {
-    const { priceId, invitation } = req.body;
+    const { invitation } = req.body;
 
-    if (!priceId || !invitation) {
+    if ((!req.body.priceId && !req.body.lookupKey) || !invitation) {
       return res.status(400).json({ error: "priceId e invitation son requeridos" });
     }
 
-    if (!(await esPrecioDePlan(priceId))) {
-      return res.status(400).json({ error: "priceId no válido para un plan" });
-    }
+    const precio = await resolverPrecioDePlan(req.body);
+    if (precio.error) return res.status(400).json({ error: precio.error });
+    const { priceId } = precio;
 
     const { userId, userEmail, name, phoneNumber, label, plan, owners } = invitation;
 
@@ -97,8 +117,10 @@ router.post("/create-checkout-invitation", async (req, res) => {
       payment_method_types: ["card"],
       mode: "payment",
       line_items: [{ price: priceId, quantity: 1 }],
+      payment_method_options: installmentsOptions(precio.months),
       metadata: {
         priceId,
+        ...metadataPlazo(precio),
         userId: userId || "",
         userEmail: userEmail || "",
         name: name || "",
@@ -121,23 +143,25 @@ router.post("/create-checkout-invitation", async (req, res) => {
 
 router.post("/create-checkout-plan", async (req, res) => {
   try {
-    const { userId, priceId, name, phoneNumber, label, userEmail } = req.body;
+    const { userId, name, phoneNumber, label, userEmail } = req.body;
 
-    if (!userId || !priceId) {
+    if (!userId || (!req.body.priceId && !req.body.lookupKey)) {
       return res.status(400).json({ error: "userId y priceId son requeridos" });
     }
 
-    if (!(await esPrecioDePlan(priceId))) {
-      return res.status(400).json({ error: "priceId no válido para un plan" });
-    }
+    const precio = await resolverPrecioDePlan(req.body);
+    if (precio.error) return res.status(400).json({ error: precio.error });
+    const { priceId } = precio;
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
       line_items: [{ price: priceId, quantity: 1 }],
+      payment_method_options: installmentsOptions(precio.months),
       metadata: {
         userId,
         priceId,
+        ...metadataPlazo(precio),
         name: name || "",
         phoneNumber: phoneNumber || "",
         label: label || "",
@@ -157,15 +181,15 @@ router.post("/create-checkout-plan", async (req, res) => {
 
 router.post("/create-checkout-preview", async (req, res) => {
   try {
-    const { userId, userEmail, priceId, previewData, successUrl, cancelUrl } = req.body;
+    const { userId, userEmail, previewData, successUrl, cancelUrl } = req.body;
 
-    if (!userId || !priceId) {
+    if (!userId || (!req.body.priceId && !req.body.lookupKey)) {
       return res.status(400).json({ error: "userId y priceId son requeridos" });
     }
 
-    if (!(await esPrecioDePlan(priceId))) {
-      return res.status(400).json({ error: "priceId no válido para un plan" });
-    }
+    const precio = await resolverPrecioDePlan(req.body);
+    if (precio.error) return res.status(400).json({ error: precio.error });
+    const { priceId } = precio;
 
     const queueId = await createCheckoutQueue(userId, userEmail, previewData);
     if (!queueId) {
@@ -176,11 +200,13 @@ router.post("/create-checkout-preview", async (req, res) => {
       payment_method_types: ["card"],
       mode: "payment",
       line_items: [{ price: priceId, quantity: 1 }],
+      payment_method_options: installmentsOptions(precio.months),
       metadata: {
         queueId,
         userId,
         userEmail: userEmail || "",
         priceId,
+        ...metadataPlazo(precio),
       },
       success_url: successUrl || "https://www.iattend.site/invitations?welcome=1",
       cancel_url: cancelUrl || "https://www.iattend.site/preview-mood",
@@ -206,6 +232,7 @@ router.post("/create-checkout-gift", async (req, res) => {
       payment_method_types: ["card"],
       mode: "payment",
       line_items: [{ price: priceId, quantity: 1 }],
+      payment_method_options: installmentsOptions(0),
       metadata: {
         giftType: "gift",
         priceId,

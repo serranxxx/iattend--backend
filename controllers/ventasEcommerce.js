@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const { plazoTexto } = require('./msiPlazo');
 
 // Compras de planes con Stripe → venta del vendedor "Ecommerce".
 // Lo llama processingPayment (webhook checkout.session.completed) después de
@@ -24,7 +25,9 @@ const idVendedorEcommerce = async () => {
   return vendedorEcommerceId;
 };
 
-async function registrarVentaEcommerce({ invitationId, planName, session }) {
+// `plazo` ({ esperado, cobrado, coincide } de revisarPlazoMSI): el plazo
+// cobrado se anota en el pago. La comisión no cambia con el plazo.
+async function registrarVentaEcommerce({ invitationId, planName, session, plazo }) {
   try {
     const plan = PLAN_DE_VENTA[String(planName).toLowerCase()];
     if (!plan || !invitationId || !session?.id) return;
@@ -45,6 +48,12 @@ async function registrarVentaEcommerce({ invitationId, planName, session }) {
       .limit(1)
       .maybeSingle();
     if (yaRegistrado) return;
+
+    // " · 6 MSI" / " · 6 MSI (precio de 3 MSI)". Contado no agrega nada.
+    const meses = plazo?.cobrado ?? plazo?.esperado ?? 0;
+    const sufijoPlazo = meses
+      ? ` · ${plazoTexto(meses)}${plazo?.coincide === false ? ` (precio de ${plazoTexto(plazo.esperado)})` : ''}`
+      : (plazo?.coincide === false ? ` · contado (precio de ${plazoTexto(plazo.esperado)})` : '');
 
     const vendedorId = await idVendedorEcommerce();
     if (!vendedorId) {
@@ -84,7 +93,7 @@ async function registrarVentaEcommerce({ invitationId, planName, session }) {
           precio_acordado: monto,
           descuento_pct: Math.max(0, descuentoPct),
           fecha_venta: fecha,
-          notas: 'Compra en línea (Stripe)',
+          notas: `Compra en línea (Stripe)${sufijoPlazo}`,
         })
         .select('id')
         .single();
@@ -99,7 +108,7 @@ async function registrarVentaEcommerce({ invitationId, planName, session }) {
       fecha,
       metodo: 'stripe',
       referencia: session.id,
-      nota: existente ? `Upgrade en línea a ${plan}` : 'Pago en línea (Stripe)',
+      nota: (existente ? `Upgrade en línea a ${plan}` : 'Pago en línea (Stripe)') + sufijoPlazo,
     });
     if (pagoError) throw pagoError;
   } catch (error) {
