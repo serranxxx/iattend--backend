@@ -97,7 +97,7 @@ const misVentas = async (req, res = response) => {
     try {
         const { data: ventas, error } = await supabase
             .from('ventas')
-            .select('id, plan, precio_acordado, descuento_pct, fecha_venta, created_at, invitations ( owners, label, name )')
+            .select('id, plan, precio_acordado, descuento_pct, comision_monto, fecha_venta, created_at, invitations ( owners, label, name )')
             .eq('vendedor_id', vendedorId)
             .order('fecha_venta', { ascending: false });
 
@@ -137,6 +137,7 @@ const misVentas = async (req, res = response) => {
                 plan: v.plan,
                 precio_acordado: v.precio_acordado,
                 descuento_pct: v.descuento_pct ?? 0,
+                comision_monto: Number(v.comision_monto || 0),
                 total_pagado: saldo.total_pagado ?? 0,
                 saldo_pendiente: saldo.saldo_pendiente ?? v.precio_acordado,
                 estado_pago: saldo.estado_pago ?? 'sin_pago',
