@@ -282,12 +282,37 @@ const editUser = async (req, res = response) => {
     }
 };
 
+// Ventana para considerar "recién creada" una cuenta en ensureAccount: cubre
+// el redirect de Google/Apple y el primer login tras el registro.
+const NEW_ACCOUNT_WINDOW_MS = 30 * 60 * 1000;
+
+// Cuenta creada en Auth hace poco y que no lleva ningún evento como planner.
+const esCuentaNuevaSinEventos = async (userId) => {
+    const { data, error } = await supabase.auth.admin.getUserById(userId);
+    const createdAt = data?.user?.created_at ? new Date(data.user.created_at).getTime() : 0;
+    if (error || !createdAt || Date.now() - createdAt > NEW_ACCOUNT_WINDOW_MS) return false;
+
+    const { count } = await supabase
+        .from('invitations')
+        .select('id', { count: 'exact', head: true })
+        .eq('planner_id', userId);
+    return !count;
+};
+
 /**
  * Asegura que una cuenta esté completa: perfil y evento en plan free.
  *
  * El alta por correo hace esto en `createUser`, pero con Google/Apple el
  * usuario nace directo en Supabase Auth y nadie le creaba ni el perfil ni el
  * evento gratis. Es idempotente: se puede llamar en cada login sin duplicar.
+ *
+ * El evento free solo se crea para una cuenta de cliente recién dada de alta:
+ * sin rol, creada en Auth hace menos de NEW_ACCOUNT_WINDOW_MS y sin ninguna
+ * invitación (ni como dueño ni como planner). Antes bastaba con no ser dueño
+ * de ninguna, y a los planners —cuyos eventos son de sus clientes, con ellos
+ * en `planner_id`— les reaparecía un evento free en cada login aunque lo
+ * borraran. No sirve "no tenía perfil": Supabase crea la fila de profiles por
+ * su cuenta al darse de alta el usuario (ver adminVentas.js).
  */
 const ensureAccount = async (req, res = response) => {
     const { userId, email, name } = req.body;
@@ -327,7 +352,7 @@ const ensureAccount = async (req, res = response) => {
         let invitationId = existing?.[0]?.id ?? null;
         let created = false;
 
-        if (!invitationId) {
+        if (!invitationId && !String(profile?.role ?? '').trim() && await esCuentaNuevaSinEventos(userId)) {
             invitationId = await createInvitationWithPlan(userId, 'free', { userEmail: email || '' });
             created = !!invitationId;
         }
@@ -353,18 +378,24 @@ const createUser = async (req, res = response) => {
         // que un rol solo se acepta si quien llama es admin; si no, cualquiera
         // podría darse de alta como Administration.
         Role = Role || null;
+        const authHeader = req.header('Authorization');
+        const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+        // Cuenta dada de alta desde Admin (con o sin rol): nace sin evento free.
+        let creadaPorAdmin = false;
+
         if (Role) {
             if (!ROLES_ASIGNABLES.includes(Role)) {
                 return res.status(400).json({ ok: false, msg: `Rol no válido: ${Role}` });
             }
 
-            const authHeader = req.header('Authorization');
-            const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
             const admin = await resolveAdminUserId(token);
 
             if (!admin.ok) {
                 return res.status(admin.status).json({ ok: false, msg: admin.msg });
             }
+            creadaPorAdmin = true;
+        } else if (token) {
+            creadaPorAdmin = (await resolveAdminUserId(token)).ok;
         }
 
         Email = Email.toLowerCase();
@@ -416,8 +447,10 @@ const createUser = async (req, res = response) => {
 
         // 4️⃣ Evento free (Save the Date): toda cuenta nueva nace con un evento
         // plan 'free' con plantilla default (uno por cuenta — se omite si ya tiene).
+        // Las cuentas que crea un admin (planners, staff, o un cliente al que
+        // luego se le asigna su invitación) nacen sin evento.
         // Best-effort: si falla, el alta de la cuenta no se bloquea.
-        try {
+        if (!creadaPorAdmin) try {
             const { data: existing } = await supabase
                 .from('invitations')
                 .select('id')

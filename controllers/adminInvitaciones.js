@@ -4,7 +4,9 @@ const supabase = require('../config/supabase');
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
 const TIPOS_VALIDOS = ['reales', 'pruebas'];
-// Una invitación es "de prueba" cuando su owner tiene alguno de estos roles
+// Una invitación es "de prueba" cuando su owner tiene alguno de estos roles o
+// cuando está marcada con `is_test` (la invitación de prueba de un planner, que
+// es cliente real). Ver migrations/2026-10-10_invitations_is_test.sql.
 const ROLES_PRUEBA = ['sales', 'test', 'Administration', 'mkt'];
 
 // Listado paginado para el catálogo de invitaciones del admin.
@@ -33,10 +35,6 @@ const listarInvitaciones = async (req, res = response) => {
             testUserIds = (perfiles || []).map(p => p.user_id).filter(Boolean);
         }
 
-        if (tipo === 'pruebas' && !testUserIds.length) {
-            return res.status(200).json({ ok: true, total: 0, limit, offset, invitations: [] });
-        }
-
         let query = supabase
             .from('invitations')
             .select(
@@ -49,10 +47,15 @@ const listarInvitaciones = async (req, res = response) => {
             );
 
         if (tipo === 'pruebas') {
-            query = query.in('user_id', testUserIds);
-        } else if (tipo === 'reales' && testUserIds.length) {
-            // user_id nulo cuenta como real (NOT IN a secas lo excluiría)
-            query = query.or(`user_id.is.null,user_id.not.in.(${testUserIds.join(',')})`);
+            query = testUserIds.length
+                ? query.or(`is_test.eq.true,user_id.in.(${testUserIds.join(',')})`)
+                : query.eq('is_test', true);
+        } else if (tipo === 'reales') {
+            query = query.eq('is_test', false);
+            if (testUserIds.length) {
+                // user_id nulo cuenta como real (NOT IN a secas lo excluiría)
+                query = query.or(`user_id.is.null,user_id.not.in.(${testUserIds.join(',')})`);
+            }
         }
 
         const { data, error, count } = await query
