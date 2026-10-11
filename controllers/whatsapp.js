@@ -12,6 +12,9 @@ const sendWhatsappTemplate = async (req, res = express.response) => {
       guestId,
       guestName,
       guestPhone,
+      // side events: id del side event. Un Evento Flash no tiene invitación
+      // y llega solo con sideEventId (migración 2026-10-10f_whatsapp_flash.sql).
+      sideEventId,
       ...payload
     } = req.body;
 
@@ -24,10 +27,10 @@ const sendWhatsappTemplate = async (req, res = express.response) => {
       });
     }
 
-    if (!invitationId || !guestId || !guestPhone) {
+    if ((!invitationId && !sideEventId) || !guestId || !guestPhone) {
       return res.status(400).json({
         ok: false,
-        msg: 'Missing required fields: invitationId, guestId, guestPhone',
+        msg: 'Missing required fields: invitationId (or sideEventId), guestId, guestPhone',
         data: null
       });
     }
@@ -50,7 +53,8 @@ const sendWhatsappTemplate = async (req, res = express.response) => {
     const { data: dispatch, error: dispatchError } = await supabase
       .from('invitation_message_dispatches')
       .insert({
-        invitation_id: invitationId,
+        invitation_id: invitationId || null,
+        side_event_id: sideEventId ?? null,
         guest_id: guestId,
         guest_name: guestName || null,
         guest_phone: guestPhone,
@@ -120,10 +124,10 @@ const sendWhatsappReminder = async (req, res = express.response) => {
       });
     }
 
-    if (!invitationId || !guestId || !guestPhone) {
+    if ((!invitationId && !sideEventId) || !guestId || !guestPhone) {
       return res.status(400).json({
         ok: false,
-        msg: 'Missing required fields: invitationId, guestId, guestPhone',
+        msg: 'Missing required fields: invitationId (or sideEventId), guestId, guestPhone',
         data: null
       });
     }
@@ -158,7 +162,7 @@ const sendWhatsappReminder = async (req, res = express.response) => {
     const { data: dispatch, error: dispatchError } = await supabase
       .from('invitation_reminder_dispatches')
       .insert({
-        invitation_id: invitationId,
+        invitation_id: invitationId || null,
         guest_id: guestId,
         side_event_id: sideEventId ?? null,
         guest_name: guestName || null,
@@ -221,13 +225,14 @@ const sendWhatsappReminder = async (req, res = express.response) => {
 const createWhatsappBulk = async (req, res = express.response) => {
   try {
     // sideEventId opcional: lote de un side event — los guestId de los items
-    // son ids de side_events_guests y el worker marca en esa tabla.
+    // son ids de side_events_guests y el worker marca en esa tabla. Un Evento
+    // Flash manda solo sideEventId (sin invitación).
     const { invitationId, sideEventId, items } = req.body;
 
-    if (!invitationId || !Array.isArray(items) || items.length === 0) {
+    if ((!invitationId && !sideEventId) || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
         ok: false,
-        msg: 'Missing required fields: invitationId, items[]',
+        msg: 'Missing required fields: invitationId (or sideEventId), items[]',
         data: null
       });
     }
@@ -252,7 +257,7 @@ const createWhatsappBulk = async (req, res = express.response) => {
     const { data: batch, error: batchError } = await supabase
       .from('invitation_send_batches')
       .insert({
-        invitation_id: invitationId,
+        invitation_id: invitationId || null,
         side_event_id: sideEventId ?? null,
         total: items.length,
         status: 'processing',
@@ -270,7 +275,7 @@ const createWhatsappBulk = async (req, res = express.response) => {
       .from('invitation_send_batch_items')
       .insert(items.map((i) => ({
         batch_id: batch.id,
-        invitation_id: invitationId,
+        invitation_id: invitationId || null,
         side_event_id: sideEventId ?? null,
         guest_id: i.guestId,
         guest_name: i.guestName || null,

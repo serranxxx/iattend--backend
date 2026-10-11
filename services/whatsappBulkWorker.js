@@ -12,6 +12,7 @@
 
 const axios = require('axios');
 const supabase = require('../config/supabase');
+const { sumarCreditosFlash } = require('../helpers/flashEvent');
 
 const SEND_INTERVAL_MS = 400;          // ~2.5 msg/s
 const RATE_LIMIT_BACKOFF_MS = 30000;   // pausa cuando Meta reporta rate limit
@@ -134,6 +135,7 @@ const processBatch = async (batchId) => {
           .from('invitation_message_dispatches')
           .insert({
             invitation_id: item.invitation_id,
+            side_event_id: item.side_event_id ?? null,
             guest_id: item.guest_id,
             guest_name: item.guest_name || null,
             guest_phone: item.guest_phone,
@@ -184,7 +186,7 @@ const processBatch = async (batchId) => {
     // Cierre del lote: status + reembolso de créditos por los fallidos
     const { data: finalBatch } = await supabase
       .from('invitation_send_batches')
-      .select('invitation_id, failed_count, status')
+      .select('invitation_id, side_event_id, failed_count, status')
       .eq('id', batchId)
       .maybeSingle();
 
@@ -195,20 +197,31 @@ const processBatch = async (batchId) => {
         .eq('id', batchId);
 
       if ((finalBatch.failed_count ?? 0) > 0) {
-        const { data: inv } = await supabase
-          .from('invitations')
-          .select('credits')
-          .eq('id', finalBatch.invitation_id)
-          .maybeSingle();
-
-        if (inv) {
-          const { error: refundError } = await supabase
+        // Los créditos salen de la invitación; un Evento Flash (sin
+        // invitación) tiene los suyos en side_events.credits.
+        if (finalBatch.invitation_id) {
+          const { data: inv } = await supabase
             .from('invitations')
-            .update({ credits: (inv.credits ?? 0) + finalBatch.failed_count })
-            .eq('id', finalBatch.invitation_id);
+            .select('credits')
+            .eq('id', finalBatch.invitation_id)
+            .maybeSingle();
 
-          if (refundError) console.error('[bulk] error reembolsando créditos:', refundError.message);
-          else console.log(`[bulk] lote ${batchId}: ${finalBatch.failed_count} créditos reembolsados`);
+          if (inv) {
+            const { error: refundError } = await supabase
+              .from('invitations')
+              .update({ credits: (inv.credits ?? 0) + finalBatch.failed_count })
+              .eq('id', finalBatch.invitation_id);
+
+            if (refundError) console.error('[bulk] error reembolsando créditos:', refundError.message);
+            else console.log(`[bulk] lote ${batchId}: ${finalBatch.failed_count} créditos reembolsados`);
+          }
+        } else if (finalBatch.side_event_id) {
+          try {
+            await sumarCreditosFlash(finalBatch.side_event_id, finalBatch.failed_count);
+            console.log(`[bulk] lote ${batchId}: ${finalBatch.failed_count} créditos reembolsados al Evento Flash`);
+          } catch (error) {
+            console.error('[bulk] error reembolsando créditos al Evento Flash:', error.message);
+          }
         }
       }
     }

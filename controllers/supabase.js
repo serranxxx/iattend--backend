@@ -81,6 +81,12 @@ async function processingPayment(session) {
 
   if (!session?.metadata) return;
 
+  // Evento que un planner compró para su cliente (controllers/planner.js).
+  if (session.metadata.plannerEventId) {
+    await require("./planner").finalizarEventoPlanner(session);
+    return;
+  }
+
   const { invitationId, userId, queueId, priceId, giftType } = session.metadata;
   if (!priceId) return;
 
@@ -118,6 +124,12 @@ async function processingPayment(session) {
     return;
   }
 
+  // Créditos de un Evento Flash (payment.js → create-checkout con sideEventId).
+  if (!invitationId && session.metadata.sideEventId && product.type === "credits") {
+    await incrementFlashCredits(session.metadata.sideEventId, product.value);
+    return;
+  }
+
   if (!invitationId) return;
 
   switch (product.type) {
@@ -133,6 +145,19 @@ async function processingPayment(session) {
       break;
     default:
       break;
+  }
+}
+
+/**
+ * Créditos de un Evento Flash (side_events.credits), de un solo golpe
+ * (helpers/flashEvent.js → sumarCreditosFlash).
+ */
+async function incrementFlashCredits(sideEventId, amount) {
+  try {
+    const credits = await require("../helpers/flashEvent").sumarCreditosFlash(sideEventId, amount);
+    if (credits == null) console.error("Evento Flash no encontrado para sumar créditos:", sideEventId);
+  } catch (error) {
+    console.error("Error sumando créditos al Evento Flash:", error.message);
   }
 }
 

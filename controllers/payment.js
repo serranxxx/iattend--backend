@@ -6,6 +6,7 @@ const { createInvitationWithPlan, createCheckoutQueue } = require("./supabase");
 const { PLAN_PRICES, PRODUCTS } = require("../config/stripe.products");
 const { getPlan, getPlanByPriceId } = require("../config/plans");
 const { resolveInstallmentLookupKey, installmentsOptions } = require("../config/stripe.installments");
+const { descuentoParaCheckout } = require("../helpers/plannerBenefits");
 
 // Un price de plan es válido si está en la lista histórica o si es el que el
 // catálogo tiene hoy para algún plan (Admin → Planes puede cambiarlo).
@@ -36,7 +37,36 @@ const metadataPlazo = ({ months, lookupKey }) =>
  */
 router.post("/create-checkout", async (req, res) => {
   try {
-    const { invitationId, priceId } = req.body;
+    const { invitationId, priceId, sideEventId } = req.body;
+
+    // Créditos de un Evento Flash (side event sin invitación): mismo checkout,
+    // los suma el webhook a side_events.credits (supabase.js → incrementFlashCredits).
+    if (sideEventId && !invitationId) {
+      if (!priceId || PRODUCTS[priceId]?.type !== "credits") {
+        return res.status(400).json({ error: "Solo se pueden comprar créditos para un Evento Flash" });
+      }
+      const { data: flash } = await supabase
+        .from("side_events")
+        .select("id, invitation_id")
+        .eq("id", sideEventId)
+        .maybeSingle();
+      if (!flash || flash.invitation_id) {
+        return res.status(404).json({ error: "Evento Flash no encontrado" });
+      }
+
+      const descuento = await descuentoParaCheckout(req);
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        mode: "payment",
+        ...(descuento.discounts ? { discounts: descuento.discounts } : {}),
+        line_items: [{ price: priceId, quantity: 1 }],
+        payment_method_options: installmentsOptions(0),
+        metadata: { ...descuento.metadata, sideEventId: String(flash.id), priceId },
+        success_url: `https://www.iattend.site/dashboard/side?flash=${flash.id}&success=true`,
+        cancel_url: `https://www.iattend.site/dashboard/side?flash=${flash.id}&canceled=true`,
+      });
+      return res.status(200).json({ url: session.url });
+    }
 
     // Validación básica
     if (!invitationId || !priceId) {
@@ -64,9 +94,12 @@ router.post("/create-checkout", async (req, res) => {
     }
 
     // Crear sesión en Stripe
+    // Descuento global si quien compra es un planner (helpers/plannerBenefits.js)
+    const descuento = await descuentoParaCheckout(req);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
+      ...(descuento.discounts ? { discounts: descuento.discounts } : {}),
 
       line_items: [
         {
@@ -77,6 +110,7 @@ router.post("/create-checkout", async (req, res) => {
       payment_method_options: installmentsOptions(0),
 
       metadata: {
+        ...descuento.metadata,
         invitationId,
         priceId,
       },
@@ -113,12 +147,16 @@ router.post("/create-checkout-invitation", async (req, res) => {
 
     const { userId, userEmail, name, phoneNumber, label, plan, owners } = invitation;
 
+    // Descuento global si quien compra es un planner (helpers/plannerBenefits.js)
+    const descuento = await descuentoParaCheckout(req);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
+      ...(descuento.discounts ? { discounts: descuento.discounts } : {}),
       line_items: [{ price: priceId, quantity: 1 }],
       payment_method_options: installmentsOptions(precio.months),
       metadata: {
+        ...descuento.metadata,
         priceId,
         ...metadataPlazo(precio),
         userId: userId || "",
@@ -153,12 +191,16 @@ router.post("/create-checkout-plan", async (req, res) => {
     if (precio.error) return res.status(400).json({ error: precio.error });
     const { priceId } = precio;
 
+    // Descuento global si quien compra es un planner (helpers/plannerBenefits.js)
+    const descuento = await descuentoParaCheckout(req);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
+      ...(descuento.discounts ? { discounts: descuento.discounts } : {}),
       line_items: [{ price: priceId, quantity: 1 }],
       payment_method_options: installmentsOptions(precio.months),
       metadata: {
+        ...descuento.metadata,
         userId,
         priceId,
         ...metadataPlazo(precio),
@@ -196,12 +238,16 @@ router.post("/create-checkout-preview", async (req, res) => {
       return res.status(500).json({ error: "Error preparando el checkout" });
     }
 
+    // Descuento global si quien compra es un planner (helpers/plannerBenefits.js)
+    const descuento = await descuentoParaCheckout(req);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
+      ...(descuento.discounts ? { discounts: descuento.discounts } : {}),
       line_items: [{ price: priceId, quantity: 1 }],
       payment_method_options: installmentsOptions(precio.months),
       metadata: {
+        ...descuento.metadata,
         queueId,
         userId,
         userEmail: userEmail || "",
@@ -228,12 +274,16 @@ router.post("/create-checkout-gift", async (req, res) => {
       return res.status(400).json({ error: "email y priceId son requeridos" });
     }
 
+    // Descuento global si quien compra es un planner (helpers/plannerBenefits.js)
+    const descuento = await descuentoParaCheckout(req);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
+      ...(descuento.discounts ? { discounts: descuento.discounts } : {}),
       line_items: [{ price: priceId, quantity: 1 }],
       payment_method_options: installmentsOptions(0),
       metadata: {
+        ...descuento.metadata,
         giftType: "gift",
         priceId,
         giftEmail: email,

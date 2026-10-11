@@ -5,6 +5,8 @@ const user = require('../models/user');
 const supabase = require('../config/supabase');
 const { createInvitationWithPlan } = require('./supabase');
 const { resolveAdminUserId } = require('../helpers/adminAuth');
+const { clonarPlantillaNuevoPlanner } = require('../helpers/plannerTemplate');
+const { tieneFuncionesDePlanner } = require('../helpers/roles');
 
 // Roles que el admin puede asignar al crear una cuenta. Sin rol = cliente.
 const ROLES_ASIGNABLES = ['Administration', 'sales', 'planner', 'mkt', 'test'];
@@ -464,6 +466,25 @@ const createUser = async (req, res = response) => {
             console.error('Error creando evento free:', freeError);
         }
 
+        // 5️⃣ Planner (o Administración, mismas funciones): nace con su invitación de prueba, copia de la plantilla
+        // (helpers/plannerTemplate.js), siempre con is_test. Best-effort: si
+        // falla, la cuenta queda creada y se avisa en la respuesta.
+        let plantilla = null;
+        if (tieneFuncionesDePlanner(Role)) {
+            // El trigger de auth.users puede pisar el rol un momento después
+            // del alta (ver adminUsuarios.js → crearPlanner): se reafirma.
+            setTimeout(() => {
+                supabase.from('profiles').update({ role: Role }).eq('user_id', data.user.id)
+                    .then(({ error: rolError }) => { if (rolError) console.error('Error reafirmando el rol:', rolError.message); });
+            }, 3000);
+            try {
+                plantilla = { ok: true, invitationId: await clonarPlantillaNuevoPlanner({ plannerId: data.user.id, plannerEmail: Email, plannerName: Name, role: Role }) };
+            } catch (plantillaError) {
+                console.error('Error copiando la plantilla de planner:', plantillaError.message);
+                plantilla = { ok: false, msg: plantillaError.message };
+            }
+        }
+
         res.status(200).json({
             ok: true,
             msg: 'User uploaded',
@@ -471,7 +492,8 @@ const createUser = async (req, res = response) => {
                 email: Email,
                 pass: Password,
                 id: data.user.id
-            }
+            },
+            plantilla,
         });
 
     } catch (error) {

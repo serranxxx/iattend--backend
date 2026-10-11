@@ -1,5 +1,6 @@
 const { response } = require('express');
 const supabase = require('../config/supabase');
+const { ROLES_PLANNER } = require('../helpers/roles');
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
@@ -126,7 +127,7 @@ const obtenerInvitacionData = async (req, res = response) => {
 }
 
 // Asigna (o quita, con planner_id null) el planner de una invitación.
-// La base ya rechaza a quien no tenga role = 'planner' (trigger
+// La base ya rechaza a quien no tenga funciones de planner (trigger
 // invitations_check_planner); se valida aquí también para responder un 400
 // claro en vez del error crudo de Postgres.
 const asignarPlanner = async (req, res = response) => {
@@ -139,7 +140,7 @@ const asignarPlanner = async (req, res = response) => {
                 .from('profiles')
                 .select('user_id')
                 .eq('user_id', plannerId)
-                .eq('role', 'planner')
+                .in('role', ROLES_PLANNER)
                 .maybeSingle();
 
             if (plannerError) {

@@ -106,6 +106,7 @@ app.use('/api/guests/import', require('./router/guestImport'));
 app.use('/api/vendedores', require('./router/vendedores'));
 app.use('/api/prospectos', require('./router/prospectos'));
 app.use('/api/ventas', require('./router/ventas'));
+app.use('/api/planner', require('./router/planner'));
 app.use('/api/pagos', require('./router/pagos'));
 app.use('/api/admin', require('./router/adminVentas'));
 app.use('/api/admin', require('./router/adminFonts'));

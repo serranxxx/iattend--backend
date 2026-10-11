@@ -43,7 +43,7 @@ const validarAccesoInvitacion = async (req, res = response, next) => {
     const activo = profile?.active ?? true;
     const puede = invitation.user_id === userId
         || (activo && profile?.role === 'Administration')
-        || (activo && profile?.role === 'planner' && invitation.planner_id === userId);
+        || (activo && profile?.role === 'planner' && invitation.planner_id === userId); // Administración ya pasa arriba
 
     if (!puede) {
         return res.status(403).json({ success: false, error: 'No tienes acceso a esta invitación' });
