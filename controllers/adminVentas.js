@@ -12,7 +12,7 @@ const listarVentas = async (req, res = response) => {
     try {
         let query = supabase
             .from('ventas')
-            .select('id, plan, precio_acordado, descuento_pct, fecha_venta, comision_monto, comision_pagada, vendedor_id, vendedores ( nombre, tipo ), invitations ( owners, label, name )')
+            .select('id, invitation_id, plan, precio_acordado, descuento_pct, fecha_venta, comision_monto, comision_pagada, vendedor_id, vendedores ( nombre, tipo ), invitations ( owners, label, name )')
             .order('fecha_venta', { ascending: false });
 
         if (vendedor_id) {
@@ -74,6 +74,8 @@ const listarVentas = async (req, res = response) => {
 
             return {
                 venta_id: v.id,
+                // Para cruzar la venta con su invitación (Analítica › Perfil).
+                invitation_id: v.invitation_id,
                 evento,
                 fecha_venta: v.fecha_venta,
                 vendedor_id: v.vendedor_id,

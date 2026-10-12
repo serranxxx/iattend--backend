@@ -106,10 +106,14 @@ const beneficiosPlanners = async (req, res = response) => {
 
         const beneficios = Object.fromEntries((filas || []).map(f => [f.planner_id, f]));
         const usados = {};
+        // gratis/compra: eventos regulares; flash: todos sus Flash; flash_gratis:
+        // los Flash que salieron de sus beneficios (Admin → Usuarios › Planners).
         (eventos || []).forEach(e => {
-            usados[e.planner_id] ??= { gratis: 0, compra: 0, flash: 0 };
-            if (e.kind === 'flash') usados[e.planner_id].flash += 1;
-            else usados[e.planner_id][e.tipo] += 1;
+            usados[e.planner_id] ??= { gratis: 0, compra: 0, flash: 0, flash_gratis: 0 };
+            if (e.kind === 'flash') {
+                usados[e.planner_id].flash += 1;
+                if (e.tipo === 'gratis') usados[e.planner_id].flash_gratis += 1;
+            } else usados[e.planner_id][e.tipo] += 1;
         });
         return res.json({ ok: true, beneficios, usados });
     } catch (error) {
