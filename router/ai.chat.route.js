@@ -302,7 +302,7 @@ const conBloques = (texto, bloques = [], uiActions = []) =>
 const edicionesComoTexto = (uiActions = []) => {
   const ediciones = uiActions.filter(a => a?.type === 'edit_invitation')
   if (!ediciones.length) return ''
-  const describir = (c) => `${c.op} ${c.campo}${c.indice != null ? ` [${c.indice}]` : ''}${c.valor != null ? `: ${JSON.stringify(c.valor).slice(0, 120)}` : ''}`
+  const describir = (c) => `${c.op} ${c.campo}${c.indice != null ? ` [${c.indice}]` : ''}${c.nombre ? `: "${c.nombre}"` : c.valor != null ? `: ${JSON.stringify(c.valor).slice(0, 120)}` : ''}`
   return `${MARCA_HECHO[0]}${ediciones.map(e => `${e.payload.seccion} → ${e.payload.cambios.map(describir).join('; ')}`).join(' | ')}${MARCA_HECHO[1]}`
 }
 
@@ -864,7 +864,21 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
     // mensaje (a veces con menos cambios): la repetición se ignora. Secciones
     // distintas sí pasan y el editor las actúa en un solo recorrido.
     const seccionesEditadas = new Set()
+    // Candado: pidió colores de la invitación (paleta, tonos…) sin hablar de
+    // vestimenta y GPT quiso cambiar el dress code. Pasó: "una paleta de
+    // colores de primavera" terminó en la descripción del dress code. Se le
+    // devuelve error para que use generals paleta.
+    const pideColores = /paleta|colou?r|tonos?\b/i.test(message || '')
+    const hablaDeVestir = /dress|vesti|ropa|atuendo|outfit|traje|etiqueta/i.test(message || '')
     const ejecutarHerramienta = async (toolName, toolInput, invId) => {
+      if (toolName === 'editar_invitacion' && toolInput?.seccion === 'dresscode' && pideColores && !hablaDeVestir) {
+        return { error: 'Pidió los colores de la invitación: eso es generals paleta (una del catálogo, por nombre), no el dress code. No toques el dress code.' }
+      }
+      // Y al revés: "el dress code en colores pastel" no es cambiar la paleta.
+      const tocaPaleta = toolInput?.seccion === 'generals' && (toolInput?.cambios ?? []).some(c => c?.campo === 'paleta')
+      if (toolName === 'editar_invitacion' && tocaPaleta && hablaDeVestir && !/invitaci|paleta/i.test(message || '')) {
+        return { error: 'Habló del dress code (la vestimenta), no de los colores de la invitación: no cambies la paleta.' }
+      }
       if (toolName === 'editar_invitacion' && seccionesEditadas.has(toolInput?.seccion)) {
         return { terminal: true, ok: true, nota: 'Ese cambio ya se mandó; no lo repitas.' }
       }

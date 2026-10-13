@@ -26,7 +26,7 @@
 
 const supabase = require('../config/supabase')
 const { anthropic, AI_MODELS, calculateCost, tokensDeEntradaAnthropic } = require('../config/ai.config')
-const { PALETAS, paletaPorNombre, paletaDeColores } = require('../config/paletasColor')
+const { PALETAS, paletaPorNombre, paletaDeColores, catalogoParaPrompt } = require('../config/paletasColor')
 
 const MAX_CAMBIOS = 6
 
@@ -298,6 +298,8 @@ Escribe primero una frase corta y en futuro inmediato ("Va, lo agrego; mira la p
 Secciones y campos (active prende o apaga la sección):
 ${Object.entries(SECCIONES).map(([id, s]) => `- ${id} (${s.nombre}): ${s.ayuda}`).join('\n')}
 Edita la sección que el organizador nombra ("la cita" es quote, "la bienvenida" es greeting, "los avisos" es notices, "los padres/padrinos" es people, "el dress code" es dresscode, "la mesa de regalos" es gifts, "hospedaje/destinos" es destinations, "la portada" es cover, "colores/paleta/textura/orden de secciones" es generals; los colores solo cambian eligiendo una paleta del catálogo); no pongas en una sección lo que pidió para otra. Lo que no está en esta lista (imágenes, canción, direcciones, tarjetas de destinos, colores y links del dress code, fuentes) no lo editas.
+"Paleta", "colores de la invitación", "tonos", "que se vea en colores de X" o una temporada/estilo de colores ("de primavera", "más cálidos") = generals paleta, NUNCA dresscode. El dress code solo si habla de vestimenta, ropa o cómo ir vestidos; y si habla del dress code (aunque mencione colores), cambia solo el dress code, no la paleta.
+Paletas del catálogo (usa el nombre exacto; la palabra clave te ayuda a elegir): ${catalogoParaPrompt()}.
 Los índices empiezan en 0 y salen de leer_invitacion. Llámala una sola vez por respuesta, con todos los cambios juntos (máximo ${MAX_CAMBIOS}); si necesitas leer_invitacion, llámala antes, en otro paso, no a la vez.`,
   input_schema: {
     type: 'object',
@@ -562,7 +564,9 @@ const limpiarCambio = async (def, cambio, cat, data, seccion) => {
       const paleta = paletaPorNombre(cambio.valor)
       if (!paleta) return { error: `paleta: usa una del catálogo, por nombre: ${PALETAS.map(p => p.name).join(', ')}.` }
       const { primary, secondary, accent, actions } = paleta
-      return { ...base, valor: { primary, secondary, accent, actions } }
+      // `nombre` es para el registro de lo hecho (⟦HECHO⟧): con los hex, Lia
+      // luego no sabría qué paleta puso.
+      return { ...base, valor: { primary, secondary, accent, actions }, nombre: paleta.name }
     }
 
     case 'textura': {
