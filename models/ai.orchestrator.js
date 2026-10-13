@@ -29,9 +29,13 @@ AYUDA: dudas sobre cómo usar la app I attend o dónde está algo, y reportes de
   event", "se puede cambiar el mensaje de bienvenida?", "dónde está el código
   del link", "el link marca error", "la página se queda en blanco"
 
-ACCION: peticiones para que Lia cree o modifique datos
+ACCION: peticiones para que Lia cree o modifique datos, incluido el contenido
+  de la invitación (avisos, cita, bienvenida, textos): agregar, cambiar,
+  quitar, mejorar o reescribir un texto para ponerlo. También la respuesta
+  "hazlo", "sí", "dale", "ponlo" cuando el contexto previo es un cambio.
   Ejemplos: "confirma a Juan", "pon a María en mesa 3", "crea una mesa",
-  "cambia el estado", "asigna", "agrega", "cambia la fecha"
+  "cambia el estado", "asigna", "agrega", "cambia la fecha", "agrega un aviso",
+  "mejora el texto de bienvenida", "pon una cita bíblica", "hazlo más amigable"
 
 EMPATIA: todo lo demás — consejos, preguntas de seguimiento,
   preguntas sobre mensajes/historial de WhatsApp, situaciones delicadas,
@@ -47,7 +51,7 @@ async function classifyIntent(message, historyMessages = []) {
 
     // Incluir último mensaje del historial para contexto
     const lastMsg = historyMessages.filter(m => m.role === 'assistant').at(-1)?.content || ''
-    const context = lastMsg ? `Contexto previo: "${lastMsg.slice(0, 100)}"\n` : ''
+    const context = lastMsg ? `Contexto previo: "${lastMsg.slice(0, 200)}"\n` : ''
 
     const result = await model.generateContent({
       systemInstruction: INTENT_SYSTEM,
@@ -117,7 +121,7 @@ async function runSonnetLoop(systemPrompt, messages, tools, executeTool, invitat
       toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(result) })
     }
     // Tools terminales (mostrar_bloque): el texto de este turno es la respuesta
-    if (resultados.every(r => r?.terminal)) {
+    if (terminaElTurno(resultados)) {
       finalText = texto
       break
     }
@@ -193,7 +197,7 @@ async function runGPTLoop(systemPrompt, messages, tools, executeTool, invitation
       })
     }
 
-    if (resultados.length && resultados.every(r => r?.terminal)) {
+    if (terminaElTurno(resultados)) {
       finalText = choice.message.content || ''
       break
     }
@@ -271,7 +275,7 @@ async function runGeminiLoop(systemPrompt, messages, tools, executeTool, invitat
       })
     }
 
-    if (resultados.every(r => r?.terminal)) {
+    if (terminaElTurno(resultados)) {
       // Gemini puede mandar texto junto con la llamada
       finalText = response.candidates?.[0]?.content?.parts?.filter(p => p.text).map(p => p.text).join('') || ''
       break
@@ -288,6 +292,32 @@ async function runGeminiLoop(systemPrompt, messages, tools, executeTool, invitat
 // ORQUESTADOR PRINCIPAL
 // ------------------------------------------------------------
 
+// El turno termina si todas las tools fueron terminales, o si una ya mandó
+// una edición de la invitación: seguir solo hace que el modelo la repita o
+// escriba de más ("ya lo cambié…") sobre algo que el organizador está viendo.
+const terminaElTurno = (resultados) => resultados.length > 0 && (
+  resultados.every(r => r?.terminal) ||
+  resultados.some(r => r?.ui_action?.type === 'edit_invitation')
+)
+
+// Herramientas que ejecutan algo (crean tarjetas o editan la invitación).
+// Sonnet nunca las recibe: las acciones van con GPT (o Gemini en consultas)
+// y Sonnet solo conversa y redacta (redactar_texto se la pide GPT a Sonnet,
+// así que Sonnet tampoco la necesita).
+const HERRAMIENTAS_SIN_SONNET = new Set([
+  'update_guest_state', 'create_table', 'update_event_date', 'assign_guest_table',
+  'delete_table', 'update_side_event_guest_state', 'editar_invitacion', 'redactar_texto',
+])
+const herramientasDeSonnet = (tools = []) => tools.filter(t => !HERRAMIENTAS_SIN_SONNET.has(t.name))
+
+// Sonnet recibe el mismo prompt (cacheado) más esta nota: sin herramientas de
+// acción no debe prometer cambios que no puede hacer.
+const NOTA_SONNET = 'En esta respuesta no puedes ejecutar acciones ni editar la invitación. Si el organizador pide un cambio, no digas que lo vas a hacer ni escribas el texto: dile en una línea que lo haces en cuanto te diga "hazlo".'
+const sistemaDeSonnet = (systemPrompt) => [
+  ...(Array.isArray(systemPrompt) ? systemPrompt : [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]),
+  { type: 'text', text: NOTA_SONNET },
+]
+
 async function orchestrate({
   invitationId,
   userMessage,
@@ -297,6 +327,7 @@ async function orchestrate({
   executeTool,
   intent: intentDado,
 }) {
+  const toolsSonnet = herramientasDeSonnet(tools)
   // 1. Clasificar intent con Gemini (no cobra crédito). La ruta puede pasarlo
   // ya clasificado para decidir antes si bloquea una acción masiva.
   const intent = intentDado || await classifyIntent(userMessage, history)
@@ -340,19 +371,21 @@ async function orchestrate({
     } else if (intent === 'ACCION') {
       result = await runGPTLoop(systemPrompt, messages, tools, conTracking(), invitationId)
     } else {
-      result = await runSonnetLoop(systemPrompt, messages, tools, conTracking(), invitationId)
+      result = await runSonnetLoop(sistemaDeSonnet(systemPrompt), messages, toolsSonnet, conTracking(), invitationId)
     }
   } catch (err) {
+    // Una acción no se pasa a Sonnet (no tiene con qué hacerla)
+    if (intent === 'ACCION') throw err
     console.error(`[orchestrate] ${intent} falló (${err.message}), escalando a Sonnet`)
-    result = await runSonnetLoop(systemPrompt, messages, tools, conTracking(), invitationId)
+    result = await runSonnetLoop(sistemaDeSonnet(systemPrompt), messages, toolsSonnet, conTracking(), invitationId)
   }
 
   // 3. Si el resultado está vacío, fallback a Sonnet
   // (Una respuesta solo con bloques no está vacía.)
-  if (!result.content?.trim() && !bloques.length && result.modelId !== AI_MODELS.SONNET) {
+  if (intent !== 'ACCION' && !result.content?.trim() && !bloques.length && !uiActions.length && result.modelId !== AI_MODELS.SONNET) {
     console.warn(`[orchestrate] respuesta vacía de ${result.modelId}, escalando a Sonnet`)
     costoPrevio += calculateCost(result.modelId, result.tokensIn, result.tokensOut)
-    result = await runSonnetLoop(systemPrompt, messages, tools, conTracking(), invitationId)
+    result = await runSonnetLoop(sistemaDeSonnet(systemPrompt), messages, toolsSonnet, conTracking(), invitationId)
   }
 
   return {
@@ -370,4 +403,4 @@ async function orchestrate({
   }
 }
 
-module.exports = { orchestrate, classifyIntent, runSonnetLoop, runGPTLoop, runGeminiLoop }
+module.exports = { orchestrate, classifyIntent, runSonnetLoop, runGPTLoop, runGeminiLoop, herramientasDeSonnet, sistemaDeSonnet }

@@ -57,11 +57,26 @@ const mesasDeLaInvitacion = async (invitationId) => {
   return (data || []).filter(m => Number(m.size) > 0)
 }
 
+// Un lugar lo ocupa un invitado CONFIRMADO con mesa, igual que el acomodo de
+// mesas (TablesPage: "71 de 84 sentados"). Los que no han confirmado pueden
+// tener mesa asignada de antemano, pero no cuentan como ocupados.
+const ESTADOS_SENTADOS = ['confirmado', 'asistente']
+
+// Ajusta el resultado del RPC get_tables_occupancy (que cuenta a cualquiera
+// con mesa) a la misma regla.
+const ocupacionDeConfirmados = (mesas = []) => mesas.map(m => {
+  const invitados = (m.guests || []).filter(g => ESTADOS_SENTADOS.includes(g.state))
+  const capacidad = Number(m.capacity) || 0
+  const sentados = invitados.length
+  return { ...m, guests: invitados, seated: sentados, available: Math.max(0, capacidad - sentados), is_full: capacidad > 0 && sentados >= capacidad }
+})
+
 const sentadosPorMesa = async (invitationId) => {
   const { data, error } = await supabase
     .from('guests')
     .select('table')
     .eq('invitation_id', invitationId)
+    .in('state', ESTADOS_SENTADOS)
     .not('table', 'is', null)
   if (error) throw error
   const conteo = new Map()
@@ -162,13 +177,18 @@ const resolverBarra = async (input, invitationId) => {
 const resolverMesas = async (input, invitationId) => {
   const [mesas, sentados] = await Promise.all([mesasDeLaInvitacion(invitationId), sentadosPorMesa(invitationId)])
   const pedidas = Array.isArray(input.numeros) ? input.numeros.map(String) : []
-  const filas = mesas
+  const todas = mesas
     .filter(m => !pedidas.length || pedidas.includes(String(m.number)))
     .map(m => ({ number: m.number, name: m.name, size: Number(m.size), seated: sentados.get(String(m.id)) || 0 }))
-    .sort((a, b) => Number(a.number) - Number(b.number))
+  if (!todas.length) return { error: 'No encontré esas mesas en este evento' }
+  // El encabezado suma TODAS las mesas pedidas; la lista muestra hasta
+  // MAX_MESAS, las de más lugares libres primero.
+  const lugares = todas.reduce((acc, m) => acc + m.size, 0)
+  const ocupados = todas.reduce((acc, m) => acc + Math.min(m.seated, m.size), 0)
+  const filas = [...todas]
+    .sort((a, b) => (b.size - b.seated) - (a.size - a.seated) || Number(a.number) - Number(b.number))
     .slice(0, MAX_MESAS)
-  if (!filas.length) return { error: 'No encontré esas mesas en este evento' }
-  return { tipo: 'mesas', titulo: titulo(input.titulo), mesas: filas }
+  return { tipo: 'mesas', titulo: titulo(input.titulo), mesas: filas, resumen: { lugares, ocupados, mesas: todas.length } }
 }
 
 // Side events con su fecha "de pared" (YYYY-MM-DD HH:mm:00, sin zona: se
@@ -230,6 +250,7 @@ const bloqueComoTexto = (b) => {
   if (b.tipo === 'side_events') return `[Side events: ${b.eventos.map(e => `${e.name} (${e.date || 'sin fecha'}, ${e.confirmados}/${e.total} confirmados)`).join('; ')}]`
   if (b.tipo === 'atajo') return `[Botón: ${b.etiqueta}]`
   if (b.tipo === 'soporte') return '[Tarjeta de contacto con soporte]'
+  if (b.tipo === 'texto') return `[Texto redactado para ${b.titulo}: "${b.texto}"]`
   if (b.tipo === 'comparacion_lados') return `[Lados: ${b.lados.map(l => `${l.nombre} ${l.total} (${l.confirmados} confirmados)`).join(' vs ')}]`
   return ''
 }
@@ -292,4 +313,4 @@ const bloquesAutomaticos = async ({ evidencias = [], mensaje = '', invitationId 
   return bloques
 }
 
-module.exports = { BLOQUE_TOOL, resolverBloque, bloqueComoTexto, bloquesAutomaticos, MAX_BLOQUES_POR_RESPUESTA }
+module.exports = { BLOQUE_TOOL, resolverBloque, bloqueComoTexto, bloquesAutomaticos, MAX_BLOQUES_POR_RESPUESTA, ocupacionDeConfirmados }

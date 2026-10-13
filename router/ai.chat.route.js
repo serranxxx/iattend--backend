@@ -13,12 +13,14 @@ const express      = require('express')
 const router       = express.Router()
 const supabase = require('../config/supabase')
 const { anthropic, AI_MODELS, calculateCost } = require('../config/ai.config')
-const { orchestrate, classifyIntent, runGeminiLoop, runGPTLoop } = require('../models/ai.orchestrator')
+const { orchestrate, classifyIntent, runGeminiLoop, runGPTLoop, herramientasDeSonnet, sistemaDeSonnet } = require('../models/ai.orchestrator')
 const { runSonnetStreamLoop } = require('../models/sonnet.stream.loop')
 const { validarAccesoInvitacion } = require('../middlewares/validar-acceso-invitacion')
 const { crearLimite, ipDe } = require('../helpers/limiteMemoria')
 const { planIncluyeLia } = require('../config/plans')
-const { BLOQUE_TOOL, resolverBloque, bloqueComoTexto, bloquesAutomaticos, MAX_BLOQUES_POR_RESPUESTA } = require('../models/lia.bloques')
+const { BLOQUE_TOOL, resolverBloque, bloqueComoTexto, bloquesAutomaticos, MAX_BLOQUES_POR_RESPUESTA, ocupacionDeConfirmados } = require('../models/lia.bloques')
+const { LEER_INVITACION_TOOL, EDITAR_INVITACION_TOOL, REDACTAR_TEXTO_TOOL, resolverLeerInvitacion, resolverEditarInvitacion, resolverRedactarTexto, resumenInvitacion, limpiarBorrador } = require('../models/lia.invitacion')
+const { armarBorrador } = require('../models/lia.onboarding')
 const { buildSystemPrompt, buildGuestSystemPrompt, tipoDeEvento, idiomaDe, diaDeCalendario, diasEntre, hoyEnMexico, fechaLarga, horaDePared } = require('../models/lia.prompt')
 
 // Los prompts (organizador e invitados) viven en models/lia.prompt.js.
@@ -234,7 +236,13 @@ const LIA_TOOLS = [
     },
   },
   BLOQUE_TOOL,
+  LEER_INVITACION_TOOL,
+  EDITAR_INVITACION_TOOL,
+  REDACTAR_TEXTO_TOOL,
 ]
+
+// Sonnet conversa y redacta; las acciones van con GPT (ver ai.orchestrator.js)
+const LIA_TOOLS_SONNET = herramientasDeSonnet(LIA_TOOLS)
 
 // ------------------------------------------------------------
 // EJECUTOR DE TOOLS
@@ -286,10 +294,34 @@ const conNotaDeLista = (data) => (Array.isArray(data) && data.length > 1
 
 // Lo que se guarda y se reenvía como historial: el texto más un resumen de
 // los bloques, para que el modelo sepa qué acaba de mostrar.
-const conBloques = (texto, bloques = []) =>
-  [texto, ...bloques.slice(0, MAX_BLOQUES_POR_RESPUESTA).map(bloqueComoTexto)].filter(Boolean).join('\n')
+const conBloques = (texto, bloques = [], uiActions = []) =>
+  [texto, ...bloques.slice(0, MAX_BLOQUES_POR_RESPUESTA).map(bloqueComoTexto), edicionesComoTexto(uiActions)].filter(Boolean).join('\n')
 
-const executeTool = async (toolName, toolInput, invitationId) => {
+// Lo que Lia editó en pantalla, para el historial: sin esto el modelo solo ve
+// "Va, lo hago" y en el siguiente mensaje vuelve a hacer los mismos cambios.
+const edicionesComoTexto = (uiActions = []) => {
+  const ediciones = uiActions.filter(a => a?.type === 'edit_invitation')
+  if (!ediciones.length) return ''
+  const describir = (c) => `${c.op} ${c.campo}${c.indice != null ? ` [${c.indice}]` : ''}${c.valor != null ? `: ${JSON.stringify(c.valor).slice(0, 120)}` : ''}`
+  return `${MARCA_HECHO[0]}${ediciones.map(e => `${e.payload.seccion} → ${e.payload.cambios.map(describir).join('; ')}`).join(' | ')}${MARCA_HECHO[1]}`
+}
+
+// Al armar los mensajes, la marca se saca de las respuestas de Lia (si se
+// queda ahí, GPT la imita en vez de llamar la herramienta) y lo hecho va
+// como contexto del mensaje actual.
+const MARCA_HECHO = ['⟦HECHO: ', '⟧']
+const RE_HECHO = /\n?⟦HECHO: ([^⟧]*)⟧/g
+const separarHechos = (mensajes) => {
+  const hechos = []
+  const limpios = mensajes.map(m => {
+    if (m.role !== 'assistant' || !m.content.includes(MARCA_HECHO[0])) return m
+    return { ...m, content: m.content.replace(RE_HECHO, (_, h) => { hechos.push(h); return '' }).trim() || '…' }
+  })
+  return { limpios, hechos }
+}
+
+// ctx.borrador: lo que el organizador tiene en el editor (ver lia.invitacion.js)
+const executeTool = async (toolName, toolInput, invitationId, ctx = {}) => {
   try {
     let data, error
 
@@ -358,7 +390,8 @@ const executeTool = async (toolName, toolInput, invitationId) => {
         }
         // Los totales se calculan aquí: al sumar el JSON mesa por mesa, los
         // modelos daban un número distinto cada vez (135, 129, 160 para 163).
-        const reales = (data || []).filter(m => Number(m.capacity) > 0)
+        // Solo confirmados ocupan lugar, igual que el acomodo de mesas
+        const reales = ocupacionDeConfirmados((data || []).filter(m => Number(m.capacity) > 0))
         const masEspacio = [...reales].sort((a, b) => b.available - a.available)[0]
         return {
           totales: {
@@ -369,7 +402,7 @@ const executeTool = async (toolName, toolInput, invitationId) => {
             mesas_llenas: reales.filter(m => m.is_full).length,
             mesa_con_mas_espacio: masEspacio ? { number: masEspacio.number, name: masEspacio.name, available: masEspacio.available } : null,
           },
-          nota: 'Usa estos totales tal cual; no los vuelvas a sumar. Para mostrar la ocupación usa mostrar_bloque (tipo barra, subtipo mesas; o tipo mesas para el detalle).',
+          nota: 'Usa estos totales tal cual; no los vuelvas a sumar. Solo cuentan los invitados confirmados con mesa (igual que la pantalla de mesas). Para mostrar la ocupación usa mostrar_bloque (tipo barra, subtipo mesas; o tipo mesas para el detalle).',
           mesas: reales,
         }
       }
@@ -456,6 +489,15 @@ const executeTool = async (toolName, toolInput, invitationId) => {
       }
       case 'mostrar_bloque':
         return resolverBloque(toolInput, invitationId)
+
+      case 'leer_invitacion':
+        return resolverLeerInvitacion(toolInput, invitationId, ctx.borrador)
+
+      case 'editar_invitacion':
+        return resolverEditarInvitacion(toolInput, invitationId, ctx.borrador)
+
+      case 'redactar_texto':
+        return resolverRedactarTexto(toolInput, invitationId, ctx.borrador)
 
       case 'ui_action': {
         // Lo que llega aquí lo decide el modelo y termina ejecutándose en el
@@ -584,31 +626,15 @@ const executeTool = async (toolName, toolInput, invitationId) => {
 }
 
 // ------------------------------------------------------------
-// DETECCIÓN DE ACCIONES EN MASA
+// ACCIONES EN MASA (tope por turno)
 // ------------------------------------------------------------
-
-// Solo se evalúan cuando el intent es ACCION: "¿cuántos de todos los
-// invitados confirmaron?" es una consulta. El número solo cuenta si son varias
-// mesas o invitados, no una capacidad ("mesa para 10 invitados").
-const BULK_PATTERNS = [
-  /(?<!para\s)(?<!de\s)\b([2-9]|\d{2,})\s+(mesas|invitad[oa]s)\b/i,
-  /\btod[oa]s\s*(los|las)\b/i,
-  /\bcada\s+una\b/i,
-  /\bgrupo\s+completo\b/i,
-  /\btoda\s+la\s+(familia|lista|mesa)\b/i,
-]
 
 const bulkBlockedMsg = (lang) => (idiomaDe(lang) === 'en'
   ? "Group actions are coming soon to Lia. For now I can help you one at a time."
   : 'Las acciones en grupo llegan muy pronto a Lia. Por ahora puedo ayudarte de una en una.')
 
-const isBulkAction = (message, intent) => {
-  if (intent !== 'ACCION') return false
-  return BULK_PATTERNS.some(pattern => pattern.test(message))
-}
-
-// Red de seguridad para lo que el regex no ve: si el modelo propone más de
-// esto en un solo turno, se descartan las propuestas y se responde el aviso.
+// Red de seguridad: si el modelo propone más de esto en un solo turno, se
+// descartan las propuestas y se responde el aviso.
 const MAX_ACCIONES_POR_TURNO = 3
 
 const UI_ACTION_TYPES = ['filter_guests', 'filter_by_state', 'open_guest_form', 'open_guest_detail']
@@ -768,7 +794,8 @@ router.post('/greeting', validarAccesoInvitacion, async (req, res) => {
 // ------------------------------------------------------------
 
 router.post('/chat', validarAccesoInvitacion, async (req, res) => {
-  const { invitation_id, message, session_id, stream = true, conversation_history, lang } = req.body
+  const { invitation_id, message, session_id, stream = true, conversation_history, lang, invitation_draft } = req.body
+  const borrador = limpiarBorrador(invitation_draft)
 
   if (!invitation_id || !message) {
     return res.status(400).json({ success: false, error: 'invitation_id y message son requeridos' })
@@ -801,10 +828,11 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
     // 2. Historial enviado por el frontend (últimos 6 registros)
     // El historial lo manda el cliente: solo user/assistant (un role "system"
     // falso pasaría tal cual a GPT) y con texto acotado.
-    const historyMessages = (Array.isArray(conversation_history) ? conversation_history : [])
+    const historyMessagesCrudos = (Array.isArray(conversation_history) ? conversation_history : [])
       .filter((m) => (m?.role === 'user' || m?.role === 'assistant') && typeof m.content === 'string')
       .slice(-6)
       .map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }))
+    const { limpios: historyMessages, hechos: hechosAntes } = separarHechos(historyMessagesCrudos)
 
     // 3. Obtener contexto del evento
     const { data: eventSummary } = await supabase
@@ -815,10 +843,38 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
     // mesa y el "sí" después de una propuesta ya están como reglas fijas del
     // prompt (models/lia.prompt.js), y el modelo ve el historial.
     const systemPrompt = buildSystemPrompt(eventSummary, { lang })
+    // En el editor, el mensaje lleva un resumen de toda la invitación (lo que
+    // ve el organizador) para que Lia entienda a qué se refiere sin otra
+    // vuelta al modelo. Va en el mensaje y no en el system para no romper la
+    // caché del prompt; no se guarda en el historial.
+    const contextoInvitacion = borrador ? resumenInvitacion(borrador) : null
+    const contexto = [
+      contextoInvitacion && `[CONTEXTO DE LA INVITACIÓN: el organizador está en el editor y esto es lo que tiene ahora, en orden]\n${contextoInvitacion}`,
+      hechosAntes.length && `[CAMBIOS QUE LIA YA HIZO en mensajes anteriores (no los repitas salvo que te los vuelva a pedir): ${hechosAntes.join(' | ')}]`,
+    ].filter(Boolean).join('\n\n')
     const currentMessages = [
       ...historyMessages,
-      { role: 'user', content: message },
+      { role: 'user', content: contexto ? `${message}\n\n${contexto}` : message },
     ]
+
+    // Lo que cuestan las herramientas que llaman a otro modelo (redactar_texto)
+    // se suma al costo del mensaje. _uso no se le regresa al modelo.
+    const usoHerramientas = { costoUsd: 0 }
+    // GPT a veces repite editar_invitacion sobre la misma sección en el mismo
+    // mensaje (a veces con menos cambios): la repetición se ignora. Secciones
+    // distintas sí pasan y el editor las actúa en un solo recorrido.
+    const seccionesEditadas = new Set()
+    const ejecutarHerramienta = async (toolName, toolInput, invId) => {
+      if (toolName === 'editar_invitacion' && seccionesEditadas.has(toolInput?.seccion)) {
+        return { terminal: true, ok: true, nota: 'Ese cambio ya se mandó; no lo repitas.' }
+      }
+      const r = await executeTool(toolName, toolInput, invId, { borrador })
+      if (toolName === 'editar_invitacion' && r?.requires_ui_action) seccionesEditadas.add(toolInput.seccion)
+      if (!r?._uso) return r
+      usoHerramientas.costoUsd += r._uso.costoUsd
+      const { _uso, ...resto } = r
+      return resto
+    }
 
     // ---- STREAMING ----
     if (stream) {
@@ -847,23 +903,11 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
         console.log(`[chat/stream] intent: ${intent}`)
         res.write(`data: ${JSON.stringify({ type: 'intent', intent })}\n\n`)
 
-        if (isBulkAction(message, intent)) {
-          const currentSessionId = toUuidSession(session_id, invitation_id)
-          await supabase.from('ai_conversations').insert([
-            { invitation_id, session_id: currentSessionId, role: 'user',      content: message },
-            { invitation_id, session_id: currentSessionId, role: 'assistant', content: bulkBlockedMsg(lang), model_used: 'blocked' },
-          ])
-          res.write(`data: ${JSON.stringify({ type: 'text', text: bulkBlockedMsg(lang) })}\n\n`)
-          res.write(`data: ${JSON.stringify({ type: 'done', pending_actions: [], tools_called: [], credits_remaining: statusData?.total_available || 0, message_id: null })}\n\n`)
-          res.end()
-          return
-        }
-
         // Wrapper de executeTool que emite eventos SSE, trackea toolsCalled y captura uiActions
         // pendingActions son retornadas por cada loop y mergeadas abajo
         const executeToolWithTracking = async (toolName, toolInput, invId) => {
           res.write(`data: ${JSON.stringify({ type: 'tool_start', tool: toolName })}\n\n`)
-          const toolResult = await executeTool(toolName, toolInput, invId)
+          const toolResult = await ejecutarHerramienta(toolName, toolInput, invId)
           toolsCalled.push(toolName)
           evidencias.push({ tool: toolName, input: toolInput, result: toolResult })
           if (toolResult?.requires_ui_action) uiActions.push(toolResult.ui_action)
@@ -886,20 +930,23 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
           } else if (intent === 'ACCION') {
             result = await runGPTLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id)
           } else {
-            result = await runSonnetStreamLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id, res, AI_MODELS.SONNET, abort.signal)
+            result = await runSonnetStreamLoop(sistemaDeSonnet(systemPrompt), currentMessages, LIA_TOOLS_SONNET, executeToolWithTracking, invitation_id, res, AI_MODELS.SONNET, abort.signal)
           }
         } catch (err) {
-          if (abort.signal.aborted) throw err
+          // Una acción no se pasa a Sonnet: no tiene con qué hacerla
+          if (abort.signal.aborted || intent === 'ACCION') throw err
           console.error(`[chat/stream] ${intent} falló, escalando a Sonnet:`, err.message)
-          result = await runSonnetStreamLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id, res, AI_MODELS.SONNET, abort.signal)
+          result = await runSonnetStreamLoop(sistemaDeSonnet(systemPrompt), currentMessages, LIA_TOOLS_SONNET, executeToolWithTracking, invitation_id, res, AI_MODELS.SONNET, abort.signal)
         }
 
         // Gemini o GPT a veces responden vacío (0 tokens, sin tools): igual que
         // en el camino sin streaming, se escala a Sonnet. Antes el organizador
         // veía una burbuja vacía con solo los botones de feedback.
-        if (!result.content?.trim() && !bloques.length && result.modelId !== AI_MODELS.SONNET) {
+        // Una edición de la invitación (ui_action) tampoco es respuesta vacía:
+        // escalar la repetiría en Sonnet y cobraría dos veces.
+        if (intent !== 'ACCION' && !result.content?.trim() && !bloques.length && !uiActions.length && result.modelId !== AI_MODELS.SONNET) {
           console.warn(`[chat/stream] respuesta vacía de ${result.modelId}, escalando a Sonnet`)
-          result = await runSonnetStreamLoop(systemPrompt, currentMessages, LIA_TOOLS, executeToolWithTracking, invitation_id, res, AI_MODELS.SONNET, abort.signal)
+          result = await runSonnetStreamLoop(sistemaDeSonnet(systemPrompt), currentMessages, LIA_TOOLS_SONNET, executeToolWithTracking, invitation_id, res, AI_MODELS.SONNET, abort.signal)
         }
 
         fullContent    = result.content
@@ -931,6 +978,22 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
           res.write(`data: ${JSON.stringify({ type: 'text', text: fullContent })}\n\n`)
         }
 
+        // GPT suele llamar editar_invitacion sin escribir nada antes
+        const ediciones = uiActions.filter(a => a.type === 'edit_invitation')
+        if (!fullContent?.trim() && ediciones.length) {
+          fullContent = idiomaDe(lang) === 'en' ? "On it; watch the screen." : 'Va, lo hago; mira la pantalla.'
+          res.write(`data: ${JSON.stringify({ type: 'text', text: fullContent })}\n\n`)
+        }
+        // Tarjetas de regalo nuevas: los links y números de cuenta los pone el
+        // organizador; se le recuerda siempre, lo haya dicho el modelo o no.
+        if (ediciones.some(a => a.payload?.cambios?.some(c => c.campo === 'cards')) && !/n[uú]mero|link|cuenta/i.test(fullContent)) {
+          const nota = idiomaDe(lang) === 'en'
+            ? 'Add the store links and account numbers yourself on each card.'
+            : 'Los links de las tiendas y los números de cuenta agrégalos tú en cada tarjeta.'
+          fullContent = `${fullContent}\n\n${nota}`
+          res.write(`data: ${JSON.stringify({ type: 'text', text: `\n\n${nota}` })}\n\n`)
+        }
+
         // Último recurso: nunca una burbuja vacía
         if (!fullContent?.trim() && !bloques.length) {
           fullContent = idiomaDe(lang) === 'en'
@@ -953,7 +1016,7 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
         .from('ai_conversations')
         .insert([
           { invitation_id, session_id: currentSessionId, role: 'user',      content: message },
-          { invitation_id, session_id: currentSessionId, role: 'assistant', content: conBloques(fullContent, bloques), model_used: modelUsed, tokens_in: totalTokensIn, tokens_out: totalTokensOut },
+          { invitation_id, session_id: currentSessionId, role: 'assistant', content: conBloques(fullContent, bloques, uiActions), model_used: modelUsed, tokens_in: totalTokensIn, tokens_out: totalTokensOut },
         ])
         .select()
       if (insertError) console.error('Error guardando conversación:', insertError.message)
@@ -977,7 +1040,7 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
       }
 
       // Log
-      const costUsd = calculateCost(modelUsed, totalTokensIn, totalTokensOut)
+      const costUsd = calculateCost(modelUsed, totalTokensIn, totalTokensOut) + usoHerramientas.costoUsd
       await supabase.rpc('log_ai_interaction', {
         p_invitation_id: invitation_id,
         p_model:         modelUsed,
@@ -998,7 +1061,7 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
         pending_actions:   savedActions,
         ui_actions:        uiActions,
         blocks:            bloques,
-        history_content:   conBloques(fullContent, bloques),
+        history_content:   conBloques(fullContent, bloques, uiActions),
         tools_called:      toolsCalled,
         credits_remaining: creditData?.total_available || 0,
         pct_free_used:     creditData?.pct_free_used   || 0,
@@ -1012,14 +1075,6 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
 
     // ---- SIN STREAMING (el que usa el dashboard) ----
     const intent = await classifyIntent(message, historyMessages)
-    if (isBulkAction(message, intent)) {
-      const currentSessionId = toUuidSession(session_id, invitation_id)
-      await supabase.from('ai_conversations').insert([
-        { invitation_id, session_id: currentSessionId, role: 'user',      content: message },
-        { invitation_id, session_id: currentSessionId, role: 'assistant', content: bulkBlockedMsg(lang), model_used: 'blocked' },
-      ])
-      return res.json({ success: true, message: bulkBlockedMsg(lang), blocked: true })
-    }
 
     const result = await orchestrate({
       invitationId: invitation_id,
@@ -1027,7 +1082,7 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
       history:      historyMessages,
       systemPrompt,
       tools:        LIA_TOOLS,
-      executeTool,
+      executeTool:  ejecutarHerramienta,
       intent,
     })
 
@@ -1049,7 +1104,7 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
       .from('ai_conversations')
       .insert([
         { invitation_id, session_id: currentSessionId, role: 'user',      content: message },
-        { invitation_id, session_id: currentSessionId, role: 'assistant', content: conBloques(result.content, result.bloques), model_used: result.modelUsed, tokens_in: result.tokensIn, tokens_out: result.tokensOut },
+        { invitation_id, session_id: currentSessionId, role: 'assistant', content: conBloques(result.content, result.bloques, result.uiActions), model_used: result.modelUsed, tokens_in: result.tokensIn, tokens_out: result.tokensOut },
       ])
       .select()
     if (convError) console.error('ERROR INSERT ai_conversations:', convError)
@@ -1068,6 +1123,8 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
         .select('id, action_type, preview_text, payload')
       savedActions = insertedActions || []
     }
+
+    result.costUsd += usoHerramientas.costoUsd
 
     await supabase.rpc('log_ai_interaction', {
       p_invitation_id: invitation_id,
@@ -1096,7 +1153,7 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
       pending_actions:   savedActions,
       ui_actions:        result.uiActions,
       blocks:            result.bloques.slice(0, MAX_BLOQUES_POR_RESPUESTA),
-      history_content:   conBloques(result.content, result.bloques),
+      history_content:   conBloques(result.content, result.bloques, result.uiActions),
       tools_called:      result.toolsCalled,
       message_id:        assistantMessageId,
     })
@@ -1126,6 +1183,40 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
 // ------------------------------------------------------------
 // POST /api/ai/chat/approve — Aprobar acción pendiente
 // ------------------------------------------------------------
+
+// ------------------------------------------------------------
+// ONBOARDING "Crea tu invitación con IA" (models/lia.onboarding.js)
+// ------------------------------------------------------------
+// Primer borrador de una invitación nueva: textos, colores, tipografías y
+// orden. No consume créditos de Lia (es la bienvenida a la plataforma), pero
+// se registra el costo; el tope por invitación evita que se use como
+// generador ilimitado.
+const limiteOnboarding = crearLimite({ max: 15, ventanaMs: 60 * 60 * 1000 })
+
+router.post('/onboarding/borrador', validarAccesoInvitacion, async (req, res) => {
+  const { invitation_id } = req.body
+  if (!limiteOnboarding(invitation_id)) {
+    return res.status(429).json({ success: false, error: 'Demasiados borradores seguidos. Intenta en un rato.' })
+  }
+  try {
+    const { plan, origen, uso } = await armarBorrador(req.body)
+    if (uso) {
+      await supabase.rpc('log_ai_interaction', {
+        p_invitation_id: invitation_id,
+        p_model:         AI_MODELS.SONNET,
+        p_tokens_in:     uso.tokensIn,
+        p_tokens_out:    uso.tokensOut,
+        p_cost_usd:      uso.costoUsd,
+        p_tool_called:   'onboarding_borrador',
+        p_success:       origen === 'ia',
+      })
+    }
+    res.json({ success: true, plan, origen })
+  } catch (err) {
+    console.error('[onboarding] error:', err.message)
+    res.status(500).json({ success: false, error: 'No se pudo armar el borrador' })
+  }
+})
 
 router.post('/chat/approve', validarAccesoInvitacion, async (req, res) => {
   const { action_id, invitation_id } = req.body
