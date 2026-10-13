@@ -6,6 +6,7 @@ const { resolveInstallmentLookupKey, installmentsOptions } = require('../config/
 const { validarCliente, validarEvento, urlOcupada, resolverCliente, enviarBienvenida, crearEventoDeCliente } = require('../helpers/clientEvent');
 const { beneficiosDe, cuponDePorcentaje } = require('../helpers/plannerBenefits');
 const { precioFlash, validarFlash, crearFlashEvent } = require('../helpers/flashEvent');
+const { registrarVentaEcommerce } = require('./ventasEcommerce');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -204,6 +205,10 @@ async function finalizarEventoPlanner(session) {
             completed_at: new Date().toISOString(),
             error: null,
         }).eq('id', id);
+        // Los Flash pagados se registran como venta de Ecommerce (pago digital).
+        if (esFlash && monto > 0) {
+            await registrarVentaEcommerce({ sideEventId: evento.sideEventId, planName: 'flash', session });
+        }
     } catch (error) {
         console.error('Evento de planner pagado sin crear:', error.message);
         await supabase.from('planner_events').update({ estado: 'fallido', monto, error: error.message }).eq('id', id);

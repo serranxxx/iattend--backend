@@ -4,7 +4,8 @@ const { generateNumericPin } = require('../helpers/simpleId');
 const { conciliarComisionesStripe } = require('../helpers/comisionStripe');
 
 const TIPOS_VENDEDOR_VALIDOS = ['interno', 'externo'];
-const PLANES_VALIDOS = ['PRO', 'Lite'];
+// Flash: venta de un Evento Flash (side_event_id, sin invitación).
+const PLANES_VALIDOS = ['PRO', 'Lite', 'Flash'];
 // transferencia pide comprobante de cada abono; digital (Stripe) no.
 const METODOS_PAGO_VALIDOS = ['transferencia', 'digital'];
 const UNIQUE_VIOLATION = '23505';
@@ -15,7 +16,7 @@ const listarVentas = async (req, res = response) => {
     try {
         let query = supabase
             .from('ventas')
-            .select('id, invitation_id, plan, precio_acordado, descuento_pct, fecha_venta, metodo_pago, comision_monto, comision_pagada, vendedor_id, vendedores ( nombre, tipo ), invitations ( owners, label, name )')
+            .select('id, invitation_id, side_event_id, plan, precio_acordado, descuento_pct, fecha_venta, metodo_pago, comision_monto, comision_pagada, vendedor_id, vendedores ( nombre, tipo ), invitations ( owners, label, name ), side_events ( name )')
             .order('fecha_venta', { ascending: false });
 
         if (vendedor_id) {
@@ -89,13 +90,14 @@ const listarVentas = async (req, res = response) => {
             const owners = v.invitations?.owners;
             const evento = Array.isArray(owners) && owners.length
                 ? owners.join(' & ')
-                : (v.invitations?.name || v.invitations?.label || '');
+                : (v.invitations?.name || v.invitations?.label || v.side_events?.name || '');
             const saldo = saldosByVentaId[v.id] || {};
 
             return {
                 venta_id: v.id,
                 // Para cruzar la venta con su invitación (Analítica › Perfil).
                 invitation_id: v.invitation_id,
+                side_event_id: v.side_event_id ?? null,
                 evento,
                 fecha_venta: v.fecha_venta,
                 vendedor_id: v.vendedor_id,
@@ -168,6 +170,50 @@ const editarVenta = async (req, res = response) => {
     }
 }
 
+// Eventos Flash (side events sin invitación) sin venta, por nombre del evento,
+// correo del cliente o nombre/correo de la planner (un Flash "para enviar
+// después" no tiene cliente). Van con side_event_id y plan 'Flash' para que el
+// alta manual los distinga.
+const flashSinVenta = async (term) => {
+    const { data: planners } = await supabase
+        .from('profiles')
+        .select('user_id')
+        // Comas y paréntesis romperían el filtro .or de PostgREST.
+        .or(`full_name.ilike.${term.replace(/[(),]/g, '')},user_email.ilike.${term.replace(/[(),]/g, '')}`)
+        .limit(20);
+    const plannerIds = (planners || []).map(p => p.user_id);
+
+    const campos = 'id, name, user_email, planner_id';
+    const [{ data: byName }, { data: byEmail }, { data: byPlanner }] = await Promise.all([
+        supabase.from('side_events').select(campos).is('invitation_id', null).ilike('name', term).limit(20),
+        supabase.from('side_events').select(campos).is('invitation_id', null).ilike('user_email', term).limit(20),
+        plannerIds.length
+            ? supabase.from('side_events').select(campos).is('invitation_id', null).in('planner_id', plannerIds).limit(20)
+            : Promise.resolve({ data: [] }),
+    ]);
+    const porId = new Map();
+    [...(byName || []), ...(byEmail || []), ...(byPlanner || [])].forEach(f => porId.set(f.id, f));
+    const lista = [...porId.values()];
+    if (!lista.length) return [];
+
+    const [{ data: conVenta }, { data: perfiles }] = await Promise.all([
+        supabase.from('ventas').select('side_event_id').in('side_event_id', lista.map(f => f.id)),
+        supabase.from('profiles').select('user_id, full_name').in('user_id', [...new Set(lista.map(f => f.planner_id).filter(Boolean))]),
+    ]);
+    const tomados = new Set((conVenta || []).map(v => v.side_event_id));
+    const nombrePlanner = new Map((perfiles || []).map(p => [p.user_id, p.full_name]));
+    return lista
+        .filter(f => !tomados.has(f.id))
+        .slice(0, 10)
+        .map(f => ({
+            side_event_id: f.id,
+            name: f.name,
+            user_email: f.user_email,
+            planner: nombrePlanner.get(f.planner_id) || null,
+            plan: 'Flash',
+        }));
+}
+
 const buscarInvitacionesSinVenta = async (req, res = response) => {
     const { q } = req.query;
 
@@ -190,9 +236,10 @@ const buscarInvitacionesSinVenta = async (req, res = response) => {
         [...(byName || []), ...(byEmail || [])].forEach(inv => byId.set(inv.id, inv));
 
         const candidates = [...byId.values()];
+        const flashes = await flashSinVenta(term);
 
         if (!candidates.length) {
-            return res.status(200).json({ invitations: [] });
+            return res.status(200).json({ invitations: flashes });
         }
 
         const { data: existingVentas, error: e3 } = await supabase
@@ -205,7 +252,7 @@ const buscarInvitacionesSinVenta = async (req, res = response) => {
         const takenIds = new Set((existingVentas || []).map(v => v.invitation_id));
         const available = candidates.filter(c => !takenIds.has(c.id)).slice(0, 20);
 
-        return res.status(200).json({ invitations: available });
+        return res.status(200).json({ invitations: [...available, ...flashes] });
 
     } catch (error) {
         return res.status(500).json({ ok: false, msg: error.message || 'Internal Server Error' });
@@ -213,14 +260,20 @@ const buscarInvitacionesSinVenta = async (req, res = response) => {
 }
 
 const crearVentaManual = async (req, res = response) => {
-    const { invitation_id, vendedor_id, plan, precio_acordado, descuento_pct, fecha_venta, metodo_pago } = req.body;
+    const { invitation_id, side_event_id, vendedor_id, precio_acordado, descuento_pct, fecha_venta, metodo_pago } = req.body;
+    // Un Flash (side_event_id) siempre es plan Flash.
+    const plan = side_event_id ? 'Flash' : req.body.plan;
 
     if (metodo_pago !== undefined && !METODOS_PAGO_VALIDOS.includes(metodo_pago)) {
         return res.status(400).json({ ok: false, msg: 'metodo_pago inválido' });
     }
 
-    if (!invitation_id) {
-        return res.status(400).json({ ok: false, msg: 'invitation_id es requerido' });
+    if (!invitation_id && !side_event_id) {
+        return res.status(400).json({ ok: false, msg: 'invitation_id o side_event_id es requerido' });
+    }
+
+    if (plan === 'Flash' && !side_event_id) {
+        return res.status(400).json({ ok: false, msg: 'El plan Flash es solo para Eventos Flash' });
     }
 
     if (!vendedor_id) {
@@ -236,23 +289,30 @@ const crearVentaManual = async (req, res = response) => {
     }
 
     try {
-        const { data: invitation, error: invError } = await supabase
-            .from('invitations')
-            .select('id')
-            .eq('id', invitation_id)
+        const [tabla, columna, id] = side_event_id
+            ? ['side_events', 'side_event_id', side_event_id]
+            : ['invitations', 'invitation_id', invitation_id];
+
+        const { data: evento, error: invError } = await supabase
+            .from(tabla)
+            .select(side_event_id ? 'id, invitation_id' : 'id')
+            .eq('id', id)
             .maybeSingle();
 
         if (invError) return res.status(500).json({ ok: false, msg: invError.message });
-        if (!invitation) return res.status(404).json({ ok: false, msg: 'Invitación no encontrada' });
+        if (!evento) return res.status(404).json({ ok: false, msg: side_event_id ? 'Evento Flash no encontrado' : 'Invitación no encontrada' });
+        if (side_event_id && evento.invitation_id) {
+            return res.status(400).json({ ok: false, msg: 'Ese side event es de una invitación, no un Evento Flash' });
+        }
 
         const { data: existing, error: existingError } = await supabase
             .from('ventas')
             .select('id')
-            .eq('invitation_id', invitation_id)
+            .eq(columna, id)
             .maybeSingle();
 
         if (existingError) return res.status(500).json({ ok: false, msg: existingError.message });
-        if (existing) return res.status(409).json({ ok: false, msg: 'Esta invitación ya tiene una venta registrada' });
+        if (existing) return res.status(409).json({ ok: false, msg: side_event_id ? 'Este Evento Flash ya tiene una venta registrada' : 'Esta invitación ya tiene una venta registrada' });
 
         const { data: vendedor, error: vendedorError } = await supabase
             .from('vendedores')
@@ -264,7 +324,7 @@ const crearVentaManual = async (req, res = response) => {
         if (!vendedor) return res.status(404).json({ ok: false, msg: 'Vendedor no encontrado' });
 
         const payload = {
-            invitation_id,
+            [columna]: id,
             vendedor_id,
             plan,
             precio_acordado,

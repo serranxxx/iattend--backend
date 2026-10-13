@@ -4,12 +4,13 @@ const { conciliarComisionesStripe } = require('../helpers/comisionStripe');
 
 // Compras de planes con Stripe → venta del vendedor "Ecommerce".
 // Lo llama processingPayment (webhook checkout.session.completed) después de
-// crear o activar la invitación. Nunca lanza: si algo falla, el pago y el plan
+// crear o activar la invitación, y finalizarEventoPlanner al crear un Evento
+// Flash pagado (venta con side_event_id y plan 'Flash', sin invitación). Nunca lanza: si algo falla, el pago y el plan
 // ya quedaron procesados y solo se registra el error.
 // Ver migrations/2026-09-29_ventas_ecommerce.sql.
 
 // ventas.plan solo acepta estos (check constraint). Paperless no se registra.
-const PLAN_DE_VENTA = { pro: 'PRO', lite: 'Lite' };
+const PLAN_DE_VENTA = { pro: 'PRO', lite: 'Lite', flash: 'Flash' };
 
 let vendedorEcommerceId = null;
 
@@ -28,10 +29,12 @@ const idVendedorEcommerce = async () => {
 
 // `plazo` ({ esperado, cobrado, coincide } de revisarPlazoMSI): el plazo
 // cobrado se anota en el pago. La comisión no cambia con el plazo.
-async function registrarVentaEcommerce({ invitationId, planName, session, plazo }) {
+async function registrarVentaEcommerce({ invitationId, sideEventId, planName, session, plazo }) {
   try {
     const plan = PLAN_DE_VENTA[String(planName).toLowerCase()];
-    if (!plan || !invitationId || !session?.id) return;
+    if (!plan || !(invitationId || sideEventId) || !session?.id) return;
+    // La venta es de la invitación o, en un Flash, del side event.
+    const [columnaEvento, idEvento] = invitationId ? ['invitation_id', invitationId] : ['side_event_id', sideEventId];
 
     // Las sesiones de prueba de Stripe no son ventas (salvo que se pida para
     // probar en local).
@@ -71,7 +74,7 @@ async function registrarVentaEcommerce({ invitationId, planName, session, plazo 
     const { data: existente } = await supabase
       .from('ventas')
       .select('id, precio_acordado')
-      .eq('invitation_id', invitationId)
+      .eq(columnaEvento, idEvento)
       .order('fecha_venta', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -88,7 +91,7 @@ async function registrarVentaEcommerce({ invitationId, planName, session, plazo 
       const { data: venta, error } = await supabase
         .from('ventas')
         .insert({
-          invitation_id: invitationId,
+          [columnaEvento]: idEvento,
           vendedor_id: vendedorId,
           plan,
           precio_acordado: monto,
