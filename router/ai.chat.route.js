@@ -869,10 +869,23 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
     // colores de primavera" terminó en la descripción del dress code. Se le
     // devuelve error para que use generals paleta.
     const pideColores = /paleta|colou?r|tonos?\b/i.test(message || '')
+    const hablaDeTextura = /textur|fondo/i.test(message || '')
+    const pideQuitarTextura = /(quita|elimina|borra|sin|ninguna|no quiero).{0,25}textura|textura.{0,15}(fuera|ninguna|no)/i.test(message || '')
     const hablaDeVestir = /dress|vesti|ropa|atuendo|outfit|traje|etiqueta/i.test(message || '')
     const ejecutarHerramienta = async (toolName, toolInput, invId) => {
       if (toolName === 'editar_invitacion' && toolInput?.seccion === 'dresscode' && pideColores && !hablaDeVestir) {
         return { error: 'Pidió los colores de la invitación: eso es generals paleta (una del catálogo, por nombre), no el dress code. No toques el dress code.' }
+      }
+      // La textura solo cambia si habló de textura (o de fondo), y solo se quita
+      // si pidió quitarla: con "algo más otoño" GPT la quitaba "para que
+      // combinara". Esos cambios se descartan y el resto pasa.
+      if (toolName === 'editar_invitacion' && toolInput?.seccion === 'generals') {
+        const sobra = (c) => c?.campo === 'textura' && (
+          !hablaDeTextura || ((c.valor == null || /^ninguna$/i.test(String(c.valor).trim())) && !pideQuitarTextura)
+        )
+        const cambios = (toolInput.cambios ?? []).filter(c => !sobra(c))
+        if (!cambios.length) return { error: 'No cambies la textura: no la mencionó. Haz solo lo que pidió.' }
+        toolInput = { ...toolInput, cambios }
       }
       // Y al revés: "el dress code en colores pastel" no es cambiar la paleta.
       const tocaPaleta = toolInput?.seccion === 'generals' && (toolInput?.cambios ?? []).some(c => c?.campo === 'paleta')
@@ -995,7 +1008,13 @@ router.post('/chat', validarAccesoInvitacion, async (req, res) => {
         // GPT suele llamar editar_invitacion sin escribir nada antes
         const ediciones = uiActions.filter(a => a.type === 'edit_invitation')
         if (!fullContent?.trim() && ediciones.length) {
-          fullContent = idiomaDe(lang) === 'en' ? "On it; watch the screen." : 'Va, lo hago; mira la pantalla.'
+          // Paleta o textura: se nombra la que quedó (pidió "hojas" y se puso
+          // "Árboles": que lo sepa).
+          const nombres = ediciones.flatMap(e => e.payload?.cambios ?? []).filter(c => c.nombre && (c.campo === 'paleta' || c.campo === 'textura'))
+          const queda = nombres.map(c => `${c.campo === 'paleta' ? 'la paleta' : 'la textura'} ${c.nombre}`).join(' y ')
+          fullContent = idiomaDe(lang) === 'en'
+            ? "On it; watch the screen."
+            : queda ? `Va, pongo ${queda}; mira la pantalla.` : 'Va, lo hago; mira la pantalla.'
           res.write(`data: ${JSON.stringify({ type: 'text', text: fullContent })}\n\n`)
         }
         // Tarjetas de regalo nuevas: los links y números de cuenta los pone el

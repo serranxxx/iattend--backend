@@ -431,6 +431,24 @@ const leerCatalogos = async () => {
 
 const normal = (t) => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase()
 
+// Lo que la gente pide ("hojas", "tela") contra los nombres del catálogo de
+// texturas. Primero el nombre exacto, luego estas palabras, luego que uno
+// contenga al otro.
+const TEXTURA_POR_PALABRA = {
+  hojas: 'arboles', hoja: 'arboles', plantas: 'arboles', ramas: 'arboles', bosque: 'arboles', naturaleza: 'arboles', jardin: 'flores',
+  floral: 'flores', flor: 'flores', tela: 'textil', lino: 'textil', telas: 'textil', muro: 'pared', concreto: 'pared', yeso: 'pared',
+  vintage: 'grunge', desgastado: 'grunge', piel: 'cuero', periodico: 'revista', algodon: 'algodon', arrugado: 'arrugado',
+}
+const texturaDelCatalogo = (valor, texturas) => {
+  const v = normal(valor).replace(/^textura (de )?/, '')
+  const porNombre = (n) => texturas.find(x => normal(x.name) === n)
+  return porNombre(v)
+    ?? texturas.find(x => String(x.id) === String(valor))
+    ?? (TEXTURA_POR_PALABRA[v] && porNombre(TEXTURA_POR_PALABRA[v]))
+    ?? texturas.find(x => normal(x.name).includes(v) || v.includes(normal(x.name)))
+    ?? null
+}
+
 // Índice de cada sección en generals.positions (el orden del editor)
 const INDICE_DE = Object.fromEntries(ESTRUCTURA.filter(e => e.indice > 0).map(e => [e.id, e.indice]))
 
@@ -563,6 +581,8 @@ const limpiarCambio = async (def, cambio, cat, data, seccion) => {
       if (op !== 'cambiar') return { error: 'paleta: usa op "cambiar" con el nombre de una paleta.' }
       const paleta = paletaPorNombre(cambio.valor)
       if (!paleta) return { error: `paleta: usa una del catálogo, por nombre: ${PALETAS.map(p => p.name).join(', ')}.` }
+      // Ya es la actual (p. ej. GPT repite lo del mensaje anterior): se omite.
+      if (paletaDeColores(data?.generals?.colors)?.name === paleta.name) return { omitir: true }
       const { primary, secondary, accent, actions } = paleta
       // `nombre` es para el registro de lo hecho (⟦HECHO⟧): con los hex, Lia
       // luego no sabría qué paleta puso.
@@ -571,9 +591,14 @@ const limpiarCambio = async (def, cambio, cat, data, seccion) => {
 
     case 'textura': {
       if (op !== 'cambiar') return { error: 'textura: usa op "cambiar".' }
-      if (cambio.valor == null || normal(cambio.valor) === 'ninguna') return { ...base, valor: null }
-      const t = cat.texturas.find(x => normal(x.name) === normal(cambio.valor) || String(x.id) === String(cambio.valor))
-      return t ? { ...base, valor: t.id } : { error: `textura: no existe. Disponibles: ${cat.texturas.map(x => x.name).join(', ')} o "ninguna".` }
+      const actual = data?.generals?.texture ?? null
+      if (cambio.valor == null || normal(cambio.valor) === 'ninguna') {
+        return actual == null ? { omitir: true } : { ...base, valor: null }
+      }
+      const t = texturaDelCatalogo(cambio.valor, cat.texturas)
+      if (!t) return { error: `textura: no hay una "${cambio.valor}". Elige la más parecida de: ${cat.texturas.map(x => x.name).join(', ')} (o "ninguna" solo si pidió quitarla), vuelve a llamar y dile cuál pusiste.` }
+      if (String(actual) === String(t.id)) return { omitir: true }
+      return { ...base, valor: t.id, nombre: t.name }
     }
 
     case 'orden': {
@@ -605,8 +630,11 @@ const resolverEditarInvitacion = async ({ seccion, cambios } = {}, invitationId,
   for (const cambio of cambios) {
     const limpio = await limpiarCambio(def, cambio, cat, data, seccion)
     if (limpio.error) return limpio
+    if (limpio.omitir) continue
     limpios.push(limpio)
   }
+  // Todo lo que pidió ya estaba así (repitió un cambio anterior).
+  if (!limpios.length) return { error: 'Eso ya está así en la invitación. No lo repitas; si pidió otra cosa, hazla o dile por qué no se puede.' }
 
   for (const c of limpios) {
     if (c.indice == null) continue
