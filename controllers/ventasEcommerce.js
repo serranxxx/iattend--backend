@@ -94,6 +94,7 @@ async function registrarVentaEcommerce({ invitationId, planName, session, plazo 
           precio_acordado: monto,
           descuento_pct: Math.max(0, descuentoPct),
           fecha_venta: fecha,
+          metodo_pago: 'digital',
           notas: `Compra en línea (Stripe)${sufijoPlazo}`,
         })
         .select('id')

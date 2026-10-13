@@ -5,6 +5,8 @@ const { conciliarComisionesStripe } = require('../helpers/comisionStripe');
 
 const TIPOS_VENDEDOR_VALIDOS = ['interno', 'externo'];
 const PLANES_VALIDOS = ['PRO', 'Lite'];
+// transferencia pide comprobante de cada abono; digital (Stripe) no.
+const METODOS_PAGO_VALIDOS = ['transferencia', 'digital'];
 const UNIQUE_VIOLATION = '23505';
 
 const listarVentas = async (req, res = response) => {
@@ -13,7 +15,7 @@ const listarVentas = async (req, res = response) => {
     try {
         let query = supabase
             .from('ventas')
-            .select('id, invitation_id, plan, precio_acordado, descuento_pct, fecha_venta, comision_monto, comision_pagada, vendedor_id, vendedores ( nombre, tipo ), invitations ( owners, label, name )')
+            .select('id, invitation_id, plan, precio_acordado, descuento_pct, fecha_venta, metodo_pago, comision_monto, comision_pagada, vendedor_id, vendedores ( nombre, tipo ), invitations ( owners, label, name )')
             .order('fecha_venta', { ascending: false });
 
         if (vendedor_id) {
@@ -101,6 +103,7 @@ const listarVentas = async (req, res = response) => {
                 // 'ecommerce' = compra en línea con Stripe: no comisiona.
                 vendedor_tipo: v.vendedores?.tipo || null,
                 plan: v.plan,
+                metodo_pago: v.metodo_pago || 'transferencia',
                 precio_acordado: v.precio_acordado,
                 total_pagado: saldo.total_pagado ?? 0,
                 saldo_pendiente: saldo.saldo_pendiente ?? v.precio_acordado,
@@ -126,9 +129,14 @@ const listarVentas = async (req, res = response) => {
 
 const editarVenta = async (req, res = response) => {
     const { venta_id } = req.params;
-    const { precio_acordado, plan, vendedor_id } = req.body;
+    const { precio_acordado, plan, vendedor_id, metodo_pago } = req.body;
+
+    if (metodo_pago !== undefined && !METODOS_PAGO_VALIDOS.includes(metodo_pago)) {
+        return res.status(400).json({ ok: false, msg: 'metodo_pago inválido' });
+    }
 
     const updates = {};
+    if (metodo_pago !== undefined) updates.metodo_pago = metodo_pago;
     if (precio_acordado !== undefined) updates.precio_acordado = precio_acordado;
     if (plan !== undefined) updates.plan = plan;
     if (vendedor_id !== undefined) updates.vendedor_id = vendedor_id;
@@ -205,7 +213,11 @@ const buscarInvitacionesSinVenta = async (req, res = response) => {
 }
 
 const crearVentaManual = async (req, res = response) => {
-    const { invitation_id, vendedor_id, plan, precio_acordado, descuento_pct, fecha_venta } = req.body;
+    const { invitation_id, vendedor_id, plan, precio_acordado, descuento_pct, fecha_venta, metodo_pago } = req.body;
+
+    if (metodo_pago !== undefined && !METODOS_PAGO_VALIDOS.includes(metodo_pago)) {
+        return res.status(400).json({ ok: false, msg: 'metodo_pago inválido' });
+    }
 
     if (!invitation_id) {
         return res.status(400).json({ ok: false, msg: 'invitation_id es requerido' });
@@ -257,6 +269,7 @@ const crearVentaManual = async (req, res = response) => {
             plan,
             precio_acordado,
             descuento_pct: Number(descuento_pct) || 0,
+            metodo_pago: metodo_pago || 'transferencia',
         };
 
         if (fecha_venta) {
