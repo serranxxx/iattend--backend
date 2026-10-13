@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const { plazoTexto } = require('./msiPlazo');
+const { conciliarComisionesStripe } = require('../helpers/comisionStripe');
 
 // Compras de planes con Stripe → venta del vendedor "Ecommerce".
 // Lo llama processingPayment (webhook checkout.session.completed) después de
@@ -102,15 +103,18 @@ async function registrarVentaEcommerce({ invitationId, planName, session, plazo 
     }
 
     // Pagado completo: el saldo de la venta queda en 0.
-    const { error: pagoError } = await supabase.from('pagos').insert({
+    const { data: pago, error: pagoError } = await supabase.from('pagos').insert({
       venta_id: ventaId,
       monto,
       fecha,
       metodo: 'stripe',
       referencia: session.id,
       nota: (existente ? `Upgrade en línea a ${plan}` : 'Pago en línea (Stripe)') + sufijoPlazo,
-    });
+    }).select('id').single();
     if (pagoError) throw pagoError;
+
+    // Lo que se queda Stripe. Lo de MSI queda estimado hasta que Stripe lo cobra.
+    await conciliarComisionesStripe({ pagoIds: [pago.id] });
   } catch (error) {
     console.error('No se pudo registrar la venta ecommerce:', error.message || error);
   }

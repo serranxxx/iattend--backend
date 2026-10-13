@@ -1,6 +1,7 @@
 const { response } = require('express');
 const supabase = require('../config/supabase');
 const { generateNumericPin } = require('../helpers/simpleId');
+const { conciliarComisionesStripe } = require('../helpers/comisionStripe');
 
 const TIPOS_VENDEDOR_VALIDOS = ['interno', 'externo'];
 const PLANES_VALIDOS = ['PRO', 'Lite'];
@@ -37,6 +38,10 @@ const listarVentas = async (req, res = response) => {
             query = query.gte('fecha_venta', start.toISOString()).lt('fecha_venta', end.toISOString());
         }
 
+        // Antes de leer: los pagos en línea cuya comisión de Stripe falta o
+        // sigue estimada (suelen ser 0 o 1).
+        await conciliarComisionesStripe();
+
         const { data: ventas, error } = await query;
 
         if (error) {
@@ -46,12 +51,25 @@ const listarVentas = async (req, res = response) => {
         const ventaIds = (ventas || []).map(v => v.id);
         let saldosByVentaId = {};
         let comprobantesPendientesByVentaId = {};
+        let stripeByVentaId = {};
 
         if (ventaIds.length) {
-            const [{ data: saldos, error: saldosError }, { data: pendientes, error: pendientesError }] = await Promise.all([
+            const [
+                { data: saldos, error: saldosError },
+                { data: pendientes, error: pendientesError },
+                { data: pagosStripe, error: stripeError },
+            ] = await Promise.all([
                 supabase.from('ventas_saldo').select('venta_id, total_pagado, saldo_pendiente, estado_pago').in('venta_id', ventaIds),
                 supabase.from('ventas_comprobante_pendiente').select('venta_id, abonos_sin_comprobante').in('venta_id', ventaIds),
+                supabase.from('pagos').select('venta_id, comision_stripe').eq('metodo', 'stripe').in('venta_id', ventaIds),
             ]);
+
+            // Sin la migración 2026-10-13_pagos_comision_stripe.sql el listado
+            // sigue funcionando, solo sin descontar a Stripe.
+            if (stripeError) console.error('Comisión de Stripe por venta:', stripeError.message);
+            (pagosStripe || []).forEach(p => {
+                stripeByVentaId[p.venta_id] = (stripeByVentaId[p.venta_id] || 0) + Number(p.comision_stripe || 0);
+            });
 
             if (saldosError) {
                 return res.status(500).json({ ok: false, msg: saldosError.message });
@@ -90,6 +108,8 @@ const listarVentas = async (req, res = response) => {
                 abonos_sin_comprobante: comprobantesPendientesByVentaId[v.id] || 0,
                 comision_monto: v.comision_monto ?? 0,
                 comision_pagada: v.comision_pagada ?? false,
+                // Lo que se quedó Stripe (cargo + MSI + Climate, con IVA).
+                comision_stripe: stripeByVentaId[v.id] || 0,
             };
         });
 
