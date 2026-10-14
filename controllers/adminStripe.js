@@ -130,8 +130,9 @@ const comisionesStripe = async (req, res = response) => {
         let total = 0;
         movimientos.forEach(bt => {
             // `fee` ya trae el IVA de la comisión. Las tarifas sueltas de Stripe
-            // (type stripe_fee) vienen como monto negativo.
-            const comision = bt.type === 'stripe_fee' ? -pesos(bt.amount) : pesos(bt.fee);
+            // (type stripe_fee, p. ej. MSI) vienen en negativo y su IVA aparte
+            // en `fee`: `net` trae los dos.
+            const comision = bt.type === 'stripe_fee' ? -pesos(bt.net) : pesos(bt.fee);
             if (!comision) return;
             const dia = new Date((bt.created - 6 * 3600) * 1000).toISOString().slice(0, 10);
             porDia[dia] = (porDia[dia] || 0) + comision;
