@@ -3,6 +3,7 @@ const supabase = require('../config/supabase');
 const { planEntitlements } = require('../config/plans');
 const { sendMail } = require('../controllers/mailer');
 const { vendorWelcomeEmailTemplate } = require('../controllers/templates/vendorWelcomeEmail');
+const { eventSharedEmailTemplate } = require('../controllers/templates/eventSharedEmail');
 const { isValidPhone } = require('./validatePhone');
 
 // Alta de un evento para un cliente: misma lógica que /sales (crearVenta en
@@ -260,6 +261,23 @@ async function enviarBienvenida(correo, password) {
 }
 
 /**
+ * Aviso a un cliente que ya tenía cuenta: su planner le asignó un evento.
+ * No interrumpe el envío si el correo falla (el evento ya quedó asignado).
+ */
+async function avisarEventoAsignado({ correo, plannerId, nombreEvento }) {
+    try {
+        const { data: planner } = await supabase
+            .from('profiles').select('full_name').eq('user_id', plannerId).maybeSingle();
+        await sendMail(correo, 'Tienes un evento nuevo en I attend', eventSharedEmailTemplate({
+            nombreEvento, nombrePlanner: planner?.full_name ?? null, email: correo,
+            loginUrl: 'https://www.iattend.site/login',
+        }));
+    } catch (mailError) {
+        console.error('Error enviando aviso de evento asignado:', mailError.message);
+    }
+}
+
+/**
  * Crea la invitación con los beneficios del plan y, si viene el correo del
  * cliente, su cuenta (o reutiliza la existente) y le manda su usuario y
  * contraseña si la cuenta es nueva. Sin correo ("enviar después") la
@@ -321,6 +339,7 @@ module.exports = {
     TIPO_EVENTO_LABELS,
     buildDefaultInvitationData,
     validarCliente,
+    avisarEventoAsignado,
     validarEvento,
     urlOcupada,
     resolverCliente,

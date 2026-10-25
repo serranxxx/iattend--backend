@@ -100,6 +100,8 @@ app.use('/api/webhook', require('./router/webhook'));
 app.use('/api/wallet', require('./router/wallet'));
 app.use('/api/photos', require('./router/photos'));
 app.use('/api/save-the-date', require('./router/saveTheDate'));
+// Confirmación sin código en side events públicos (candado abierto de un Flash)
+app.use('/api/side-events', require('./router/sideEventPublic'));
 // Limpieza de los archivos temporales del Save the Date gratis
 app.use('/api/storage', require('./router/storage'));
 app.use('/api/guests/import', require('./router/guestImport'));

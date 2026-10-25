@@ -3,7 +3,7 @@ const Stripe = require('stripe');
 const supabase = require('../config/supabase');
 const { getPlan } = require('../config/plans');
 const { resolveInstallmentLookupKey, installmentsOptions } = require('../config/stripe.installments');
-const { validarCliente, validarEvento, urlOcupada, resolverCliente, enviarBienvenida, crearEventoDeCliente } = require('../helpers/clientEvent');
+const { validarCliente, validarEvento, urlOcupada, resolverCliente, enviarBienvenida, avisarEventoAsignado, crearEventoDeCliente } = require('../helpers/clientEvent');
 const { beneficiosDe, cuponDePorcentaje } = require('../helpers/plannerBenefits');
 const { precioFlash, validarFlash, crearFlashEvent } = require('../helpers/flashEvent');
 const { registrarVentaEcommerce } = require('./ventasEcommerce');
@@ -233,8 +233,9 @@ async function finalizarEventoPlanner(session) {
 /**
  * POST /api/planner/eventos/:id/cliente  { correo_cliente, nombre_cliente }
  * Manda al cliente un evento creado "para enviar después": crea su cuenta (o
- * usa la que ya tiene), pone su user_id en la invitación y, si la cuenta es
- * nueva, le manda su usuario y contraseña. No crea otra invitación.
+ * usa la que ya tiene), pone su user_id en la invitación y le manda correo:
+ * usuario y contraseña si la cuenta es nueva, o un aviso de que tiene un
+ * evento nuevo si ya era cliente. No crea otra invitación.
  */
 const asignarCliente = async (req, res = response) => {
     const { error: invalido, cliente } = validarCliente(req.body);
@@ -243,7 +244,7 @@ const asignarCliente = async (req, res = response) => {
     try {
         const { data: invitacion, error } = await supabase
             .from('invitations')
-            .select('id, user_id, planner_id, owners')
+            .select('id, user_id, planner_id, owners, titulo:data->cover->title->text->>value')
             .eq('id', req.params.id)
             .maybeSingle();
         if (error) return res.status(500).json({ ok: false, msg: error.message });
@@ -271,6 +272,7 @@ const asignarCliente = async (req, res = response) => {
         }
 
         if (cuenta.cuentaNueva) await enviarBienvenida(cliente.correo, cuenta.password);
+        else await avisarEventoAsignado({ correo: cliente.correo, plannerId: req.plannerId, nombreEvento: invitacion.titulo || (invitacion.owners ?? []).join(' & ') });
 
         return res.json({ ok: true, cliente_existente: !cuenta.cuentaNueva });
     } catch (error) {
@@ -398,7 +400,7 @@ const asignarClienteFlash = async (req, res = response) => {
     try {
         const { data: flash, error } = await supabase
             .from('side_events')
-            .select('id, user_id, planner_id, invitation_id')
+            .select('id, user_id, planner_id, invitation_id, name')
             .eq('id', req.params.id)
             .maybeSingle();
         if (error) return res.status(500).json({ ok: false, msg: error.message });
@@ -421,6 +423,7 @@ const asignarClienteFlash = async (req, res = response) => {
         }
 
         if (cuenta.cuentaNueva) await enviarBienvenida(cliente.correo, cuenta.password);
+        else await avisarEventoAsignado({ correo: cliente.correo, plannerId: req.plannerId, nombreEvento: flash.name });
         return res.json({ ok: true, cliente_existente: !cuenta.cuentaNueva });
     } catch (error) {
         return res.status(500).json({ ok: false, msg: error.message });

@@ -50,7 +50,8 @@ function escapeHtml(value) {
  * @param {string} o.headline    HTML de los titulares (fila 1 de la carta)
  * @param {string} o.paragraph   HTML del párrafo (fila 2 de la carta)
  * @param {string} o.email       ya escapado
- * @param {string} o.password    ya escapado
+ * @param {string|null} o.password  ya escapado; null = cuenta que ya existía:
+ *   en vez de las credenciales dice que entre con su cuenta de siempre
  * @param {string} [o.note]      HTML opcional entre credenciales y botón
  * @param {string} o.loginUrl
  */
@@ -162,7 +163,7 @@ function welcomeEnvelopeEmail({ title, variant, height, headline, paragraph, ema
               <v:fill type="frame" src="${img('pocket.jpg')}" color="${PURPLE}" />
               <v:textbox inset="0,${POCKET_PAD}px,0,0">
             <![endif]-->
-            <div style="font-family:${SANS};font-weight:500;font-size:17px;line-height:20px;color:${CREAM};">Tus datos de acceso:</div>
+            <div style="font-family:${SANS};font-weight:500;font-size:17px;line-height:20px;color:${CREAM};">${password ? 'Tus datos de acceso:' : 'Entra con tu cuenta de siempre:'}</div>
 
             <table role="presentation" align="center" width="340" cellpadding="0" cellspacing="0" border="0" style="width:340px;margin:16px auto 0;">
               <tr>
@@ -173,9 +174,10 @@ function welcomeEnvelopeEmail({ title, variant, height, headline, paragraph, ema
                   <div class="wl-email" style="margin-top:4px;font-family:${MONO};font-size:16px;line-height:22px;font-weight:600;color:${CREAM};word-break:break-all;">
                     <a class="wl-email-link" href="mailto:${email}" style="color:${CREAM};text-decoration:none;font-family:${MONO};font-weight:600;"><span style="color:${CREAM};text-decoration:none;">${email}</span></a>
                   </div>
+                  ${password ? `
                   <div style="height:1px;line-height:1px;font-size:0;background-color:rgba(241,235,222,0.3);margin:14px 0;">&nbsp;</div>
                   <div style="font-family:${SANS};font-size:11px;line-height:14px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#E4DAEE;">Contraseña</div>
-                  <div style="margin-top:4px;font-family:${MONO};font-size:22px;line-height:28px;font-weight:600;letter-spacing:2px;color:${CREAM};">${password}</div>
+                  <div style="margin-top:4px;font-family:${MONO};font-size:22px;line-height:28px;font-weight:600;letter-spacing:2px;color:${CREAM};">${password}</div>` : ''}
                 </td>
               </tr>
             </table>
