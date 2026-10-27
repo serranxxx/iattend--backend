@@ -75,6 +75,47 @@ const markSideGuestAsInvited = async (guestId) => {
   if (error) console.error('[bulk] error marcando side guest', guestId, error.message);
 };
 
+// Lote de recordatorios (kind = 'reminder', Guest management → Recordatorios):
+// mismo registro que el recordatorio individual (sendWhatsappReminder) —
+// invitation_reminder_dispatches + contador en el titular — y NO se toca
+// guests.state: el invitado ya confirmado sigue confirmado.
+const registerReminder = async (item, batch, data) => {
+  const { data: guestRow } = await supabase
+    .from('guests')
+    .select('reminder_count')
+    .eq('id', item.guest_id)
+    .maybeSingle();
+
+  const reminderNumber = (guestRow?.reminder_count ?? 0) + 1;
+
+  const { error: dispatchError } = await supabase
+    .from('invitation_reminder_dispatches')
+    .insert({
+      invitation_id: item.invitation_id,
+      guest_id: item.guest_id,
+      guest_name: item.guest_name || null,
+      guest_phone: item.guest_phone,
+      meta_message_id: data?.messages?.[0]?.id || null,
+      template_name: item.payload?.template?.name,
+      reminder_template_id: batch.reminder_template_id ?? null,
+      batch_id: batch.id,
+      reminder_number: reminderNumber,
+      trigger_source: 'manual',
+      credit_charged: true,
+      status: 'processing',
+      raw_send_response: data,
+    });
+
+  if (dispatchError) console.error('[bulk] error guardando recordatorio:', dispatchError.message);
+
+  const { error: counterError } = await supabase
+    .from('guests')
+    .update({ reminder_count: reminderNumber, last_reminder_at: new Date().toISOString() })
+    .eq('id', item.guest_id);
+
+  if (counterError) console.error('[bulk] error actualizando contador de recordatorios', item.guest_id, counterError.message);
+};
+
 const sendItem = async (item) => {
   const phoneNumberId = process.env.WA_PHONE_NUMBER_ID;
   const token = process.env.WA_ACCESS_TOKEN;
@@ -107,6 +148,13 @@ const processBatch = async (batchId) => {
   activeBatches.add(batchId);
 
   try {
+    const { data: batchInfo } = await supabase
+      .from('invitation_send_batches')
+      .select('id, kind, reminder_template_id')
+      .eq('id', batchId)
+      .maybeSingle();
+    const isReminder = batchInfo?.kind === 'reminder';
+
     for (;;) {
       const { data: item, error: itemError } = await supabase
         .from('invitation_send_batch_items')
@@ -131,27 +179,32 @@ const processBatch = async (batchId) => {
         const data = await sendItem(item);
         const metaMessageId = data?.messages?.[0]?.id || null;
 
-        const { error: dispatchError } = await supabase
-          .from('invitation_message_dispatches')
-          .insert({
-            invitation_id: item.invitation_id,
-            side_event_id: item.side_event_id ?? null,
-            guest_id: item.guest_id,
-            guest_name: item.guest_name || null,
-            guest_phone: item.guest_phone,
-            meta_message_id: metaMessageId,
-            status: 'processing',
-            raw_send_response: data,
-          });
-
-        if (dispatchError) console.error('[bulk] error guardando dispatch:', dispatchError.message);
-
-        if (item.side_event_id) {
-          await markSideGuestAsInvited(item.guest_id);
+        if (isReminder) {
+          await registerReminder(item, batchInfo, data);
+          sent = true;
         } else {
-          await markGuestAsInvited(item.guest_id);
+          const { error: dispatchError } = await supabase
+            .from('invitation_message_dispatches')
+            .insert({
+              invitation_id: item.invitation_id,
+              side_event_id: item.side_event_id ?? null,
+              guest_id: item.guest_id,
+              guest_name: item.guest_name || null,
+              guest_phone: item.guest_phone,
+              meta_message_id: metaMessageId,
+              status: 'processing',
+              raw_send_response: data,
+            });
+
+          if (dispatchError) console.error('[bulk] error guardando dispatch:', dispatchError.message);
+
+          if (item.side_event_id) {
+            await markSideGuestAsInvited(item.guest_id);
+          } else {
+            await markGuestAsInvited(item.guest_id);
+          }
+          sent = true;
         }
-        sent = true;
       } catch (error) {
         errorDetail = JSON.stringify(error?.response?.data?.error ?? { message: error.message });
         console.error('[bulk] envío fallido para guest', item.guest_id, errorDetail);

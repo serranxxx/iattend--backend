@@ -117,6 +117,7 @@ app.use('/api/admin', require('./router/adminGastosFijos'));
 app.use('/api/admin', require('./router/adminGiftBrands'));
 app.use('/api/admin', require('./router/plans').adminRouter);
 app.use('/api/admin', require('./router/adminOnboarding'));
+app.use('/api/admin', require('./router/adminReminderTemplates'));
 app.use('/api/admin', require('./router/adminUsuarios'));
 app.use('/api/admin', require('./router/adminStripe'));
 app.use('/api/admin', require('./router/adminLia'));

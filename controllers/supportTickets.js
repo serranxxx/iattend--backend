@@ -10,6 +10,10 @@ const TOPICS = {
     help: 'Necesito ayuda',
     improvement: 'Quiero sugerir una mejora',
     question: 'Tengo una pregunta general',
+    // Guest management → Recordatorios → "Solicitar recordatorio". El texto
+    // es la propuesta del mensaje; se da de alta en Admin → Configuración →
+    // Recordatorios cuando Meta lo aprueba.
+    reminder_request: 'Solicitud de recordatorio',
 };
 const ESTADOS = ['open', 'in_progress', 'resolved'];
 const MAX_BODY = 5000;
