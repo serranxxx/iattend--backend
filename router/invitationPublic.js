@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
+const { validarAccesoInvitacion } = require('../middlewares/validar-acceso-invitacion');
 
 const router = express.Router();
 
@@ -121,6 +122,32 @@ router.post('/:id/confirmacion-publica', async (req, res) => {
     } catch (err) {
         console.error('Error en POST /api/invitations/:id/confirmacion-publica:', err);
         return res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
+});
+
+// PATCH /api/invitations/:invitationId/acceso — { type: 'open' | 'closed' }
+// El candado del header de iattend-vite. Por aquí y no directo desde el front:
+// con la anon key, si las políticas de la tabla no dejan actualizar la fila
+// (planner, admin), Supabase no marca error y el cambio no se guardaba.
+// Pueden cambiarlo el dueño, el planner asignado o Administración.
+router.patch('/:invitationId/acceso', validarAccesoInvitacion, async (req, res) => {
+    const type = req.body?.type;
+    if (type !== 'open' && type !== 'closed') {
+        return res.status(400).json({ success: false, error: 'type debe ser open o closed' });
+    }
+    try {
+        const { data, error } = await supabase
+            .from('invitations')
+            .update({ type })
+            .eq('id', req.params.invitationId)
+            .select('id, type')
+            .maybeSingle();
+        if (error) return res.status(500).json({ success: false, error: error.message });
+        if (!data) return res.status(404).json({ success: false, error: 'Invitación no encontrada' });
+        return res.json({ success: true, type: data.type });
+    } catch (err) {
+        console.error('Error en PATCH /api/invitations/:id/acceso:', err);
+        return res.status(500).json({ success: false, error: 'Error interno del servidor' });
     }
 });
 
