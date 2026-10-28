@@ -91,6 +91,7 @@ app.use(express.urlencoded({ extended: false }));
 app.use('/api/auth', require('./router/auth'));
 // Después de express.json(): /purchase es POST y necesita req.body.
 app.use('/api/ai/credits', require('./router/ai.credits.route'));
+app.use('/api/storage', require('./router/storage.route'));
 app.use('/api/ai/write', require('./router/ai.write.route'));
 app.use('/api/ai', require('./router/ai.chat.route'));
 app.use('/api/mail', require('./router/mailer'));
@@ -103,6 +104,8 @@ app.use('/api/photos', require('./router/photos'));
 app.use('/api/save-the-date', require('./router/saveTheDate'));
 // Confirmación sin código en side events públicos (candado abierto de un Flash)
 app.use('/api/side-events', require('./router/sideEventPublic'));
+// Confirmación en una invitación pública (candado abierto, invitations.type = 'open').
+app.use('/api/invitations', require('./router/invitationPublic'));
 // Limpieza de los archivos temporales del Save the Date gratis
 app.use('/api/storage', require('./router/storage'));
 app.use('/api/guests/import', require('./router/guestImport'));
@@ -116,6 +119,9 @@ app.use('/api/admin', require('./router/adminFonts'));
 app.use('/api/admin', require('./router/adminInvitaciones'));
 app.use('/api/admin', require('./router/adminGastosFijos'));
 app.use('/api/admin', require('./router/adminGiftBrands'));
+app.use('/api/admin', require('./router/adminEditorCatalog'));
+app.use('/api/admin', require('./router/adminStorage'));
+app.use('/api/admin', require('./router/adminSettings'));
 app.use('/api/admin', require('./router/plans').adminRouter);
 app.use('/api/admin', require('./router/adminOnboarding'));
 app.use('/api/admin', require('./router/adminReminderTemplates'));

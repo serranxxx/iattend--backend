@@ -24,12 +24,18 @@ const DESTINOS = {
   greeting_title: { es: 'el título de la sección de bienvenida (una frase muy corta)', max: 45 },
   quote:          { es: 'una frase o cita para la sección "Frase" (puede ser una cita conocida con su autor, o una frase original)', max: 170 },
   notice:         { es: 'un aviso para los invitados (indicación práctica: niños, estacionamiento, código de vestimenta, horario, etc.)', max: 150 },
+  // Popover "Reescribir con Lia" de la barra de texto: cualquier texto
+  // elegido en la pieza. Título corto o párrafo; el largo lo manda el editor
+  // (el del texto actual con holgura), acotado aquí.
+  rewrite_title:  { es: 'una nueva versión de este título de la invitación (una frase corta, misma intención)', max: 60 },
+  rewrite_body:   { es: 'una nueva versión de este texto de la invitación (misma información, mejor redactado)', max: 400 },
 }
 
 const TONOS = {
   romantic: 'romántico y cálido',
   formal:   'formal y elegante',
   fun:      'divertido y desenfadado',
+  short:    'breve y directo (más corto que el texto actual)',
 }
 
 const HERRAMIENTA = {
@@ -46,8 +52,12 @@ const HERRAMIENTA = {
 
 router.post('/', validarAccesoInvitacion, async (req, res) => {
   const { invitation_id, target, prompt = '', tone = 'romantic', lang, count = 3, current = '', avoid = [] } = req.body
-  const destino = DESTINOS[target]
-  if (!destino) return res.status(400).json({ success: false, error: 'target no válido' })
+  const base = DESTINOS[target]
+  if (!base) return res.status(400).json({ success: false, error: 'target no válido' })
+  // Reescribir: el largo sigue al texto actual (con holgura), sin pasar el tope.
+  const destino = target.startsWith('rewrite_') && current?.trim()
+    ? { ...base, max: Math.min(base.max, Math.max(40, Math.round(current.trim().length * (tone === 'short' ? 1 : 1.4)))) }
+    : base
   const cuantas = Math.min(3, Math.max(1, Number(count) || 3))
 
   if (!(await planIncluyeLia(req.invitation?.plan))) {
