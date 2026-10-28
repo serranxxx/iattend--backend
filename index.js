@@ -91,6 +91,7 @@ app.use(express.urlencoded({ extended: false }));
 app.use('/api/auth', require('./router/auth'));
 // Después de express.json(): /purchase es POST y necesita req.body.
 app.use('/api/ai/credits', require('./router/ai.credits.route'));
+app.use('/api/ai/write', require('./router/ai.write.route'));
 app.use('/api/ai', require('./router/ai.chat.route'));
 app.use('/api/mail', require('./router/mailer'));
 app.use('/api/whats', require('./router/whatsapp'));
