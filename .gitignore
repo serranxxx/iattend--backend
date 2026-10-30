@@ -1,8 +1,16 @@
+# Variables de entorno
 .env
-.env
+
+# Certificados de Apple Wallet
 certificates/
 *.p12
 *.cer
 *.pem
 *.key
 *.certSigningRequest
+
+# Dependencias (DigitalOcean las instala con npm ci desde package-lock.json)
+node_modules/
+
+# macOS
+.DS_Store
