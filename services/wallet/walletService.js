@@ -134,9 +134,12 @@ async function fetchImageBuffer(url) {
  * @param {string} [data.coverImageUrl]  URL of the event cover image
  * @param {string} [data.primaryColor]   CSS color used as pass background (legacy fallback)
  * @param {string} [data.accentColor]    CSS color used for text (legacy fallback)
+ * @param {{label: string, value: string|number}[]} [data.auxFields]
+ *        Side events / Flash: replace the "Mesa" field (e.g. Personas, Folio).
+ *        Omitted for invitations, which keep the table field.
  * @returns {Promise<Buffer>}
  */
-async function generateWalletPass({ guestId, guestName, eventName, eventDate, eventTime, tableNumber, coverImageUrl, primaryColor, accentColor }) {
+async function generateWalletPass({ guestId, guestName, eventName, eventDate, eventTime, tableNumber, coverImageUrl, primaryColor, accentColor, auxFields }) {
     const p12B64 = process.env.APPLE_WALLET_P12_BASE64;
     const wwdrB64 = process.env.APPLE_WWDR_CERT_BASE64;
     const passphrase = process.env.APPLE_WALLET_CERT_PASSWORD;
@@ -206,10 +209,16 @@ async function generateWalletPass({ guestId, guestName, eventName, eventDate, ev
     // Secondary: guest name
     pass.secondaryFields.push({ key: 'guest', label: 'Nombre', value: guestName });
 
-    // Auxiliary: table number
-    pass.auxiliaryFields.push({ key: 'table', label: 'Mesa', value: tableLabel });
+    // Auxiliary: table number (invitations) or the side event's own fields
+    if (Array.isArray(auxFields) && auxFields.length) {
+        auxFields.slice(0, 3).forEach((f, i) => {
+            pass.auxiliaryFields.push({ key: `aux${i}`, label: String(f?.label ?? ''), value: String(f?.value ?? '') });
+        });
+    } else {
+        pass.auxiliaryFields.push({ key: 'table', label: 'Mesa', value: tableLabel });
+    }
 
-    // QR encodes guestId for scanner verification
+    // QR encodes guestId for scanner verification (side events send "side:<id>")
     pass.setBarcodes(String(guestId));
 
     // ── Images ────────────────────────────────────────────────────────────────

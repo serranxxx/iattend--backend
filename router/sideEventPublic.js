@@ -46,8 +46,70 @@ const limpiar = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_
 const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const nuevoCodigo = () => Array.from(crypto.randomBytes(6), b => ALFABETO[b % ALFABETO.length]).join('');
 
+// Avatar con que aparece en "Asistentes" (solo Flash): un emoji y/o un color
+// (índice de la paleta `profiles` de iattend-events, ConfirmCard/profiles.ts;
+// columnas side_events_guests.emoji / .profile). Sin ellos, sus iniciales con
+// un color fijo por invitado.
+const MAX_PERFIL = 15;
+const emojiValido = (v) => {
+    const e = String(v ?? '').trim();
+    // Un solo grafema (emoji con modificadores incluidos), sin letras ni números.
+    if (!e || e.length > 16 || /[\p{L}\p{N}<>]/u.test(e)) return null;
+    const seg = typeof Intl.Segmenter === 'function' ? [...new Intl.Segmenter('es', { granularity: 'grapheme' }).segment(e)] : [e];
+    return seg.length === 1 ? e : null;
+};
+const perfilValido = (v) => (Number.isInteger(v) && v >= 0 && v <= MAX_PERFIL ? v : null);
+const primerNombre = (n) => String(n ?? '').trim().split(/\s+/)[0] || '';
+// Solo letras: "Abuela (Lupita)" → "AL", no "A(".
+const inicialesDe = (n) => String(n ?? '').trim().split(/\s+/).map(p => p.match(/\p{L}/u)?.[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?';
+
+// GET /api/side-events/:id/asistentes
+// Quiénes confirmaron, para el cuadro "Asistentes" de un Flash (side event sin
+// invitación) que lo tiene prendido (body.showAttendees). Solo primer nombre,
+// iniciales y avatar: nada de teléfonos ni códigos. Más reciente primero.
+router.get('/:id/asistentes', async (req, res) => {
+    try {
+        const { data: evento, error } = await supabase
+            .from('side_events')
+            .select('id, invitation_id, body')
+            .eq('id', req.params.id)
+            .maybeSingle();
+        if (error) return res.status(500).json({ ok: false, msg: error.message });
+        if (!evento || evento.invitation_id || !evento.body?.showAttendees) {
+            return res.status(404).json({ ok: false, msg: 'Sin asistentes públicos' });
+        }
+
+        const { data, error: errAsist, count } = await supabase
+            .from('side_events_guests')
+            .select('id, name, emoji, profile, companion_id', { count: 'exact' })
+            .eq('side_events_id', evento.id)
+            .eq('state', 'confirmado')
+            .order('last_update_date', { ascending: false })
+            .limit(300);
+        if (errAsist) return res.status(500).json({ ok: false, msg: errAsist.message });
+
+        res.set('Cache-Control', 'no-store');
+        return res.json({
+            ok: true,
+            total: count ?? data.length,
+            asistentes: (data ?? []).map(g => ({
+                id: String(g.id),
+                nombre: primerNombre(g.name),
+                iniciales: inicialesDe(g.name),
+                emoji: emojiValido(g.emoji),
+                perfil: perfilValido(g.profile),
+                // Id del titular si es acompañante (la tarjeta los agrupa en cápsulas).
+                titular: g.companion_id ? String(g.companion_id) : null,
+            })),
+        });
+    } catch (err) {
+        console.error('Error en GET /api/side-events/:id/asistentes:', err);
+        return res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
+});
+
 // POST /api/side-events/:id/confirmacion-publica
-// { nombre, acompanantes: string[], estado: 'confirmado' | 'rechazado' }
+// { nombre, acompanantes: string[], estado: 'confirmado' | 'rechazado', emoji?, perfil? }
 router.post('/:id/confirmacion-publica', async (req, res) => {
     // Sin `trust proxy` en la app, req.ip es la del balanceador: se usa la
     // primera de x-forwarded-for (basta para un límite blando).
@@ -96,7 +158,11 @@ router.post('/:id/confirmacion-publica', async (req, res) => {
 
         const { data: titular, error: titularError } = await supabase
             .from('side_events_guests')
-            .insert({ ...filaBase, password: nuevoCodigo(), name: nombre, companion_id: null, has_companion: conAcompanantes.length > 0 })
+            .insert({
+                ...filaBase, password: nuevoCodigo(), name: nombre, companion_id: null, has_companion: conAcompanantes.length > 0,
+                emoji: estado === 'confirmado' ? emojiValido(req.body?.emoji) : null,
+                profile: estado === 'confirmado' ? perfilValido(req.body?.perfil) : null,
+            })
             .select('*')
             .single();
         if (titularError) return res.status(500).json({ ok: false, msg: titularError.message });

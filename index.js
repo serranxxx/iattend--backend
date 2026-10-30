@@ -47,7 +47,7 @@ const corsOptions = {
         }
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'token', 'vendor-token'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'token', 'vendor-token', 'x-codigo-invitado', 'x-token-registro'],
 };
 
 app.use(cors(corsOptions));
@@ -105,6 +105,10 @@ app.use('/api/photos', require('./router/photos'));
 app.use('/api/save-the-date', require('./router/saveTheDate'));
 // Confirmación sin código en side events públicos (candado abierto de un Flash)
 app.use('/api/side-events', require('./router/sideEventPublic'));
+// Chat de asistentes de un Flash (solo confirmados; el organizador modera).
+app.use('/api/side-events', require('./router/sideEventChat'));
+// Registro de asistentes de un Flash (formulario del organizador; datos sensibles).
+app.use('/api/side-events', require('./router/sideEventForm'));
 // Confirmación en una invitación pública (candado abierto, invitations.type = 'open').
 app.use('/api/invitations', require('./router/invitationPublic'));
 // Limpieza de los archivos temporales del Save the Date gratis

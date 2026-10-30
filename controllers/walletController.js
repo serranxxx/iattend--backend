@@ -1,7 +1,7 @@
 const { generateWalletPass } = require('../services/wallet/walletService');
 
 const generatePass = async (req, res) => {
-    const { guestId, guestName, eventName, eventDate, eventTime, tableNumber, coverImageUrl, primaryColor, accentColor } = req.body;
+    const { guestId, guestName, eventName, eventDate, eventTime, tableNumber, coverImageUrl, primaryColor, accentColor, auxFields } = req.body;
 
     if (!guestId || !guestName || !eventName || !eventDate) {
         return res.status(400).json({
@@ -11,7 +11,7 @@ const generatePass = async (req, res) => {
     }
 
     try {
-        const passBuffer = await generateWalletPass({ guestId, guestName, eventName, eventDate, eventTime, tableNumber, coverImageUrl, primaryColor, accentColor });
+        const passBuffer = await generateWalletPass({ guestId, guestName, eventName, eventDate, eventTime, tableNumber, coverImageUrl, primaryColor, accentColor, auxFields });
 
         if (!passBuffer || passBuffer.length < 100) {
             return res.status(500).json({
