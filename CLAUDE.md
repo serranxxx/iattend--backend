@@ -207,7 +207,9 @@ CLIENT_URL   # presente en .env pero no se referencia en ningún .js actualmente
   migración, el pase sale como antes, sin actualizaciones. `WALLET_CUENTA_REGRESIVA=off`
   apaga la cuenta regresiva.
   Título y foto del pase: `invitation.data.wallet.title` / `.image` (panel "Pase
-  digital" de vite) o los de la portada. Logo = el actual de I attend
+  digital" de vite; en side events / Flash `body.wallet`) o los de la portada.
+  `wallet.enabled === false` = el organizador apagó Apple Wallet: no se genera
+  el pase (404). Logo = el actual de I attend
   (`models/wallet/pass.pass/logo*.png`, de `iattend-vite/public/images/logo_cover.png`,
   50 pt de alto); el ícono (notificaciones) es la foto del evento en cuadrado.
   `POST /api/wallet/actualizar { kind, eventoId }` (vite al publicar) refresca en

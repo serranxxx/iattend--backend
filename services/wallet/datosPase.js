@@ -55,6 +55,14 @@ function instanteDePared(pared, zona) {
     return new Date(comoUTC - (enZona - comoUTC)).toISOString();
 }
 
+// "20:00" → "8:00 pm" (como el boleto de la página y la invitación).
+const hora12 = (hhmm) => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm ?? ''));
+    if (!m) return '';
+    const h = Number(m[1]);
+    return `${h % 12 || 12}:${m[2]} ${h < 12 ? 'am' : 'pm'}`;
+};
+
 const escaparHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 // Dirección legible (las viejas traen calle / numero / colonia / ciudad / estado).
@@ -206,6 +214,8 @@ async function datosPaseInvitacion(invitationId, guestId) {
     ]);
     if (!inv?.data || !guest) return null;
     const d = inv.data;
+    // Apple Wallet apagado por el organizador (vite → Pase digital).
+    if (d.wallet?.enabled === false) return null;
 
     let tableNumber = null;
     if (guest.table) {
@@ -260,6 +270,8 @@ async function datosPaseSide(eventId, guestId) {
     ]);
     if (!evento?.body || !guest || !ESTADOS_CON_PASE_SIDE.includes(guest.state)) return null;
     const body = evento.body;
+    // Apple Wallet apagado por el organizador (vite → Pase digital).
+    if (body.wallet?.enabled === false) return null;
     // Hora de pared "YYYY-MM-DD HH:mm:00" (sin huso): el encabezado la enseña tal cual.
     const hora = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(String(body.hour ?? ''));
     if (!hora) return null;
@@ -284,18 +296,21 @@ async function datosPaseSide(eventId, guestId) {
 
     const a = body.address;
     const direccion = textoDireccion({ street: a?.street, number: a?.number, neighborhood: a?.neighborhood, city: a?.city, state: a?.state });
-    const lugares = direccion ? [{ nombre: body.place_name || null, hora: hora[2], direccion, url: a?.url || null }] : [];
+    const lugares = direccion ? [{ nombre: body.place_name || null, hora: hora12(hora[2]), direccion, url: a?.url || null }] : [];
     const itinerario = (body.itinerary ?? []).filter((m) => m.name)
-        .map((m) => [m.time, m.name, m.place ? `— ${m.place}` : null].filter(Boolean).join('  '));
+        .map((m) => [m.time ? hora12(m.time) || m.time : null, m.name, m.place ? `— ${m.place}` : null].filter(Boolean).join('  '));
 
     const base = {
         // El backend usa guestId como contenido del QR: va con el prefijo (paseSide.ts).
         guestId: `side:${guest.id}`,
         guestName: guest.name ?? 'Invitado',
-        eventName: evento.name ?? 'Evento',
+        // Título y foto del pase (vite → Pase digital) o los del evento.
+        eventName: String(body.wallet?.title ?? '').trim() || evento.name || 'Evento',
         eventDate: `${hora[1]}T${hora[2]}:00`,
-        eventTime: hora[2],
-        coverImageUrl: body.image || evento.url_image || null,
+        eventTime: hora12(hora[2]),
+        // Foto del pase; si no, la imagen del link (con los elementos de la
+        // portada si se armó "desde mi diseño") y si no, la portada.
+        coverImageUrl: body.wallet?.image || evento.url_image || body.image || null,
         primaryColor: body.color ?? '#2A2730',
         accentColor: '#FFFFFF',
         auxFields: [
