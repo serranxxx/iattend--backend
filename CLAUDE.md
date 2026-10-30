@@ -185,6 +185,33 @@ CLIENT_URL   # presente en .env pero no se referencia en ningún .js actualmente
   desde variables de entorno en Base64 (`APPLE_WALLET_P12_BASE64`,
   `APPLE_WWDR_CERT_BASE64`) — no hardcodear rutas a los archivos del repo
   para el flujo de producción.
+- Pases de Wallet que se actualizan (`services/wallet/`, migración
+  `2026-10-31_wallet_actualizaciones.sql`): el pase de cada invitado lo arma
+  el backend desde Supabase (`datosPase.js`; `GET /api/wallet/pase/invitacion/:inv/:guest`
+  y `/pase/side/:evento/:guest`, que iattend-events solo reenvía) con número de
+  serie fijo (`inv-…` / `side-…`) y token en `wallet_passes`. Diseño clásico
+  con QR (no "poster": Apple no lo admite con QR). Reverso: "Avisos del
+  evento" (`changeMessage` → notificación), cada dirección del itinerario con
+  nombre del lugar y link a Maps, itinerario y link a la invitación. Varias
+  direcciones: todas en el reverso y en `locations` (máx. 10); el lugar
+  "oficial" (`semantics.venue*`) es el que el organizador marcó como principal
+  (`itinerary.object[n].principal = true`) o, sin marca, el último con dirección.
+  Coordenadas solo del link de Google Maps de la dirección (`geocodificar.js`,
+  caché en `wallet_geocodes`); no geocodificar por texto (OSM ubicaba
+  Chihuahua en Juárez). Servicio web de PassKit en `router/wallet.js` (`/v1/…`),
+  avisos por APNs con el mismo certificado del pase (`apns.js`, cuerpo `{}`,
+  `apns-push-type: background`). Avisos: `avisarPases` / `tocarPases`
+  (`avisos.js`); bienvenida al escanear (`POST /api/wallet/bienvenida`, la llama
+  el lector de vite) y cuenta regresiva 7 / 1 / 0 días (`helpers/walletScheduler.js`).
+  Sin `WALLET_WEB_SERVICE_URL` (https, ej. `https://…/api/wallet`) o sin la
+  migración, el pase sale como antes, sin actualizaciones. `WALLET_CUENTA_REGRESIVA=off`
+  apaga la cuenta regresiva.
+  Título y foto del pase: `invitation.data.wallet.title` / `.image` (panel "Pase
+  digital" de vite) o los de la portada. Logo = el actual de I attend
+  (`models/wallet/pass.pass/logo*.png`, de `iattend-vite/public/images/logo_cover.png`,
+  50 pt de alto); el ícono (notificaciones) es la foto del evento en cuadrado.
+  `POST /api/wallet/actualizar { kind, eventoId }` (vite al publicar) refresca en
+  silencio los pases registrados de ese evento, una vez por minuto.
 - No hay tests automatizados (`npm test` es un placeholder que falla) — los
   cambios se validan manualmente contra los frontends.
 - Lia no lee `ai_conversations` como contexto — el historial de conversación

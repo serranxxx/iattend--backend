@@ -40,6 +40,7 @@ const forge = require('node-forge');
 }());
 
 const { PKPass } = require('passkit-generator');
+const sharp = require('sharp');
 const path = require('path');
 
 const MODEL_PATH = path.join(__dirname, '..', '..', 'models', 'wallet', 'pass.pass');
@@ -111,6 +112,18 @@ async function fetchImageBuffer(url) {
     }
 }
 
+// Certificado del tipo de pase (firma los pases y autentica los avisos a APNs).
+function credencialesApple() {
+    const p12B64 = process.env.APPLE_WALLET_P12_BASE64;
+    const wwdrB64 = process.env.APPLE_WWDR_CERT_BASE64;
+    const passphrase = process.env.APPLE_WALLET_CERT_PASSWORD;
+
+    const missing = [!p12B64 && 'APPLE_WALLET_P12_BASE64', !wwdrB64 && 'APPLE_WWDR_CERT_BASE64', !passphrase && 'APPLE_WALLET_CERT_PASSWORD'].filter(Boolean);
+    if (missing.length) throw new Error(`Missing required env vars: ${missing.join(', ')}`);
+
+    return { p12Buffer: Buffer.from(p12B64, 'base64'), wwdrBuffer: Buffer.from(wwdrB64, 'base64'), passphrase };
+}
+
 /**
  * Generates an Apple Wallet posterEventTicket .pkpass buffer for a guest.
  *
@@ -137,18 +150,26 @@ async function fetchImageBuffer(url) {
  * @param {{label: string, value: string|number}[]} [data.auxFields]
  *        Side events / Flash: replace the "Mesa" field (e.g. Personas, Folio).
  *        Omitted for invitations, which keep the table field.
+ *
+ * Pases que se actualizan (services/wallet/datosPase.js); todos opcionales,
+ * sin ellos el pase sale como siempre:
+ * @param {string} [data.serialNumber]        Fijo por invitado (para actualizarlo).
+ * @param {string} [data.authenticationToken] Token del pase (≥ 16 caracteres).
+ * @param {string} [data.webServiceURL]       Base del servicio web (https).
+ * @param {object[]} [data.backFields]        Reverso: { key, label, value, attributedValue?, changeMessage? }.
+ * @param {{startDate: string, endDate?: string}[]} [data.relevantDates]
+ * @param {{latitude: number, longitude: number, relevantText?: string}[]} [data.locations] Máx. 10.
+ * @param {string} [data.expirationDate]      ISO: después de esa fecha el pase sale vencido.
+ * @param {string} [data.groupingIdentifier]  Agrupa los pases del mismo evento.
+ * @param {string} [data.eventStartDate]      ISO, para semantics.
+ * @param {{name?: string, latitude?: number, longitude?: number}} [data.venue]
  * @returns {Promise<Buffer>}
  */
-async function generateWalletPass({ guestId, guestName, eventName, eventDate, eventTime, tableNumber, coverImageUrl, primaryColor, accentColor, auxFields }) {
-    const p12B64 = process.env.APPLE_WALLET_P12_BASE64;
-    const wwdrB64 = process.env.APPLE_WWDR_CERT_BASE64;
-    const passphrase = process.env.APPLE_WALLET_CERT_PASSWORD;
-
-    const missing = [!p12B64 && 'APPLE_WALLET_P12_BASE64', !wwdrB64 && 'APPLE_WWDR_CERT_BASE64', !passphrase && 'APPLE_WALLET_CERT_PASSWORD'].filter(Boolean);
-    if (missing.length) throw new Error(`Missing required env vars: ${missing.join(', ')}`);
-
-    const p12Buffer = Buffer.from(p12B64, 'base64');
-    const wwdrBuffer = Buffer.from(wwdrB64, 'base64');
+async function generateWalletPass({
+    guestId, guestName, eventName, eventDate, eventTime, tableNumber, coverImageUrl, primaryColor, accentColor, auxFields,
+    serialNumber, authenticationToken, webServiceURL, backFields, relevantDates, locations, expirationDate, groupingIdentifier, eventStartDate, venue,
+}) {
+    const { p12Buffer, wwdrBuffer, passphrase } = credencialesApple();
 
     if (p12Buffer.length === 0) throw new Error('APPLE_WALLET_P12_BASE64 decoded to empty buffer — check the value in DigitalOcean');
     if (wwdrBuffer.length === 0) throw new Error('APPLE_WWDR_CERT_BASE64 decoded to empty buffer — check the value in DigitalOcean');
@@ -170,8 +191,13 @@ async function generateWalletPass({ guestId, guestName, eventName, eventDate, ev
     }, {
         passTypeIdentifier: process.env.APPLE_PASS_TYPE_ID,
         teamIdentifier: process.env.APPLE_TEAM_ID,
-        serialNumber: `iattend-${guestId}-${Date.now()}`,
+        serialNumber: serialNumber || `iattend-${guestId}-${Date.now()}`,
         description: eventName,
+        // Título de las notificaciones del pase (avisos): el nombre del evento.
+        organizationName: eventName,
+        ...(groupingIdentifier ? { groupingIdentifier } : {}),
+        // Solo con los dos el pase se registra para recibir actualizaciones.
+        ...(webServiceURL && authenticationToken ? { webServiceURL, authenticationToken } : {}),
 
         // Colors — used on older iOS; iOS 18+ auto-derives them from the cover image
         backgroundColor: bgColor,
@@ -190,6 +216,11 @@ async function generateWalletPass({ guestId, guestName, eventName, eventDate, ev
             eventType: 'PKEventTypeSocialGathering',
             attendeeName: guestName,
             silenceRequested: false,
+            ...(eventStartDate ? { eventStartDate } : {}),
+            ...(venue?.name ? { venueName: venue.name } : {}),
+            ...(venue?.latitude != null && venue?.longitude != null
+                ? { venueLocation: { latitude: venue.latitude, longitude: venue.longitude } }
+                : {}),
         },
     });
 
@@ -221,25 +252,42 @@ async function generateWalletPass({ guestId, guestName, eventName, eventDate, ev
     // QR encodes guestId for scanner verification (side events send "side:<id>")
     pass.setBarcodes(String(guestId));
 
+    // Reverso del pase (botón ⓘ): avisos, direcciones, itinerario, links.
+    if (Array.isArray(backFields)) {
+        backFields.forEach((f) => { if (f && f.key && f.value != null && f.value !== '') pass.backFields.push(f); });
+    }
+
+    // Pantalla de bloqueo: a la hora del evento y cerca de sus direcciones.
+    if (Array.isArray(relevantDates) && relevantDates.length) pass.setRelevantDates(relevantDates);
+    if (Array.isArray(locations) && locations.length) pass.setLocations(...locations.slice(0, 10));
+    if (expirationDate) pass.setExpirationDate(new Date(expirationDate));
+
     // ── Images ────────────────────────────────────────────────────────────────
+    // Boleto clásico: la portada de fondo (Wallet la desenfoca) y la misma
+    // como miniatura a la derecha. Wallet no usa la banda (strip) si hay
+    // fondo, así que no va. Cada imagen a su tamaño (fondo 180 × 220 pt,
+    // miniatura hasta 90 × 90 pt; @2x y @3x) y PNG con paleta: antes iba la
+    // portada completa nueve veces (~1 MB) y el pase se vuelve a descargar
+    // en cada actualización.
     if (coverImageUrl) {
         try {
             const imgBuffer = await fetchImageBuffer(coverImageUrl);
-
-            // posterEventTicket: full-cover background
-            pass.addBuffer('background.png', imgBuffer);
-            pass.addBuffer('background@2x.png', imgBuffer);
-            pass.addBuffer('background@3x.png', imgBuffer);
-
-            // eventTicket legacy: strip banner at top
-            pass.addBuffer('strip.png', imgBuffer);
-            pass.addBuffer('strip@2x.png', imgBuffer);
-            pass.addBuffer('strip@3x.png', imgBuffer);
-
-            // thumbnail: used as event badge in some Wallet views
-            pass.addBuffer('thumbnail.png', imgBuffer);
-            pass.addBuffer('thumbnail@2x.png', imgBuffer);
-            pass.addBuffer('thumbnail@3x.png', imgBuffer);
+            const png = (img) => img.png({ palette: true, quality: 85, compressionLevel: 9 }).toBuffer();
+            const escalas = [1, 2, 3];
+            const fondos = await Promise.all(escalas.map((x) => png(sharp(imgBuffer).rotate()
+                .resize({ width: 180 * x, height: 220 * x, fit: 'cover', position: 'attention' }))));
+            const miniaturas = await Promise.all(escalas.map((x) => png(sharp(imgBuffer).rotate()
+                .resize({ width: 90 * x, height: 90 * x, fit: 'inside' }))));
+            // Ícono (29 pt, cuadrado): es el que sale en las notificaciones del
+            // pase y en la pantalla de bloqueo; con la foto del evento se
+            // reconoce de quién es el aviso.
+            const iconos = await Promise.all(escalas.map((x) => png(sharp(imgBuffer).rotate()
+                .resize({ width: 29 * x, height: 29 * x, fit: 'cover', position: 'attention' }))));
+            ['', '@2x', '@3x'].forEach((sufijo, i) => {
+                pass.addBuffer(`background${sufijo}.png`, fondos[i]);
+                pass.addBuffer(`thumbnail${sufijo}.png`, miniaturas[i]);
+                pass.addBuffer(`icon${sufijo}.png`, iconos[i]);
+            });
         } catch (err) {
             console.warn('Could not fetch cover image for pass:', err.message);
         }
@@ -248,4 +296,4 @@ async function generateWalletPass({ guestId, guestName, eventName, eventDate, ev
     return pass.getAsBuffer();
 }
 
-module.exports = { generateWalletPass };
+module.exports = { generateWalletPass, credencialesApple, extractFromP12 };

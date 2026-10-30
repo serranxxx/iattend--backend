@@ -141,6 +141,10 @@ app.use('/api/configuracion-pagos', require('./router/configuracionPagos'));
 const { iniciarReglaVolverAContactar } = require('./helpers/prospectosScheduler');
 iniciarReglaVolverAContactar();
 
+// Cuenta regresiva en los pases de Apple Wallet (7 días, 1 día y el día).
+const { iniciarCuentaRegresivaWallet } = require('./helpers/walletScheduler');
+iniciarCuentaRegresivaWallet();
+
 // Retomar lotes de envío masivo que hayan quedado a medias por un restart
 const { resumePendingBatches } = require('./services/whatsappBulkWorker');
 resumePendingBatches();
