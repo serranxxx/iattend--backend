@@ -36,5 +36,8 @@
   },
   "overrides": {
     "joi": "17.13.9"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }
