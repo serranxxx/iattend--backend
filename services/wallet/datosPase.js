@@ -105,6 +105,24 @@ function inicioInvitacion(fechaValor, momentos) {
     return instanteDePared(`${partes.year}-${partes.month}-${partes.day} ${hora}`, zona);
 }
 
+// "Chihuahua, Chihuahua": ciudad y estado del lugar (semantics.venueRegionName).
+const regionDe = (a) => [a?.city ?? a?.ciudad, a?.state ?? a?.estado].filter(Boolean).join(', ') || null;
+
+// Nombres de los acompañantes confirmados de un titular.
+async function acompanantesDe(tabla, titularId) {
+    const estados = tabla === 'guests' ? ['confirmado', 'asistente'] : ESTADOS_CON_PASE_SIDE;
+    const { data } = await supabase.from(tabla).select('name').eq('companion_id', titularId).in('state', estados);
+    return (data ?? []).map((g) => g.name).filter(Boolean);
+}
+
+// "Additional Ticket Info": invitado, acompañantes, personas y lo propio.
+const infoDelInvitado = ({ nombre, acompanantes, extra = [] }) => [
+    { label: 'Invitado', value: nombre || 'Invitado' },
+    ...(acompanantes.length ? [{ label: acompanantes.length === 1 ? 'Acompañante' : 'Acompañantes', value: acompanantes.join(', ') }] : []),
+    { label: 'Personas', value: String(1 + acompanantes.length) },
+    ...extra.filter((f) => f.value),
+];
+
 // Renglón de wallet_passes (número de serie y token). null si no hay tabla.
 async function asegurarPase({ kind, invitationId, sideEventId, guestId, eventoFecha }) {
     const serial = `${kind === 'side' ? 'side' : 'inv'}-${kind === 'side' ? sideEventId : invitationId}-${guestId}`;
@@ -196,7 +214,7 @@ async function completar(base, { fila, eventoFecha, lugares, itinerario, linkInv
         // Dos días después del evento sale como vencido.
         ...(ultimo ? { expirationDate: new Date(ultimo + 48 * HORA).toISOString() } : {}),
         ...(eventoFecha ? { eventStartDate: eventoFecha } : {}),
-        ...(principal ? { venue: { name: principal.maps?.nombre || principal.nombre || principal.direccion, latitude: principal.maps?.lat, longitude: principal.maps?.lng } } : {}),
+        ...(principal ? { venue: { name: principal.maps?.nombre || principal.nombre || principal.direccion, latitude: principal.maps?.lat, longitude: principal.maps?.lng, region: principal.region || undefined } } : {}),
     };
 }
 
@@ -210,7 +228,7 @@ const toCoverImageUrl = (src) => {
 async function datosPaseInvitacion(invitationId, guestId) {
     const [{ data: inv }, { data: guest }] = await Promise.all([
         supabase.from('invitations').select('id, label, name, data').eq('id', invitationId).maybeSingle(),
-        supabase.from('guests').select('id, name, table, invitation_id').eq('id', guestId).eq('invitation_id', invitationId).maybeSingle(),
+        supabase.from('guests').select('id, name, table, invitation_id, password').eq('id', guestId).eq('invitation_id', invitationId).maybeSingle(),
     ]);
     if (!inv?.data || !guest) return null;
     const d = inv.data;
@@ -239,7 +257,7 @@ async function datosPaseInvitacion(invitationId, guestId) {
             continue;
         }
         vistos.add(direccion);
-        lugares.push({ nombre: m.name || null, hora: m.time || null, direccion, url: m.address?.url || null, principal: m.principal === true });
+        lugares.push({ nombre: m.name || null, hora: m.time || null, direccion, url: m.address?.url || null, principal: m.principal === true, region: regionDe(m.address) });
     }
     const itinerario = momentos.filter((m) => m.name).map((m) => [m.time, m.name].filter(Boolean).join('  '));
 
@@ -255,6 +273,13 @@ async function datosPaseInvitacion(invitationId, guestId) {
         coverImageUrl: toCoverImageUrl(d.wallet?.image) || toCoverImageUrl(d.cover?.image?.prod),
         primaryColor: d.generals?.colors?.primary ?? '#FFFFFF',
         accentColor: d.generals?.colors?.accent ?? '#FFFFFF',
+        // Diseño nuevo: su mesa a la derecha (si ya tiene) y él abajo.
+        asiento: tableNumber,
+        textoPie: guest.name ?? 'Invitado',
+        infoAdicional: infoDelInvitado({
+            nombre: guest.name, acompanantes: await acompanantesDe('guests', guest.id),
+            extra: [{ label: 'Mesa', value: tableNumber != null ? String(tableNumber) : 'Por asignar' }, { label: 'Código', value: guest.password }],
+        }),
     };
     const linkInvitacion = inv.label && inv.name ? `${URL_EVENTOS}/${encodeURIComponent(inv.label)}/${encodeURIComponent(inv.name)}` : null;
     const datos = await completar(base, { fila, eventoFecha, lugares, itinerario, linkInvitacion, grupo: `inv-${invitationId}` });
@@ -279,9 +304,8 @@ async function datosPaseSide(eventId, guestId) {
     const fechas = (Array.isArray(body.dates) && body.dates.length ? body.dates : [body.hour]).map((f) => instanteDePared(f, zona)).filter(Boolean);
     const eventoFecha = fechas[0] ?? null;
 
-    const { data: acompanantes } = await supabase.from('side_events_guests').select('id')
-        .eq('companion_id', guest.id).in('state', ESTADOS_CON_PASE_SIDE);
-    const personas = 1 + (acompanantes?.length ?? 0);
+    const acompanantes = await acompanantesDe('side_events_guests', guest.id);
+    const personas = 1 + acompanantes.length;
 
     // Folio del titular en el formulario del Flash.
     let folio = null;
@@ -296,7 +320,7 @@ async function datosPaseSide(eventId, guestId) {
 
     const a = body.address;
     const direccion = textoDireccion({ street: a?.street, number: a?.number, neighborhood: a?.neighborhood, city: a?.city, state: a?.state });
-    const lugares = direccion ? [{ nombre: body.place_name || null, hora: hora12(hora[2]), direccion, url: a?.url || null }] : [];
+    const lugares = direccion ? [{ nombre: body.place_name || null, hora: hora12(hora[2]), direccion, url: a?.url || null, region: regionDe(a) }] : [];
     const itinerario = (body.itinerary ?? []).filter((m) => m.name)
         .map((m) => [m.time ? hora12(m.time) || m.time : null, m.name, m.place ? `— ${m.place}` : null].filter(Boolean).join('  '));
 
@@ -317,6 +341,12 @@ async function datosPaseSide(eventId, guestId) {
             { label: 'Personas', value: personas },
             ...(clave ? [{ label: folio ? 'Folio' : 'Código', value: clave }] : []),
         ],
+        // Diseño nuevo: el invitado a la derecha (no hay mesa) y abajo el lugar.
+        asiento: guest.name ?? 'Invitado',
+        infoAdicional: infoDelInvitado({
+            nombre: guest.name, acompanantes,
+            extra: clave ? [{ label: folio ? 'Folio' : 'Código', value: clave }] : [],
+        }),
     };
     const datos = await completar(base, {
         fila, eventoFecha, fechas, lugares, itinerario,

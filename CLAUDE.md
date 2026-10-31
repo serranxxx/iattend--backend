@@ -189,8 +189,17 @@ CLIENT_URL   # presente en .env pero no se referencia en ningún .js actualmente
   `2026-10-31_wallet_actualizaciones.sql`): el pase de cada invitado lo arma
   el backend desde Supabase (`datosPase.js`; `GET /api/wallet/pase/invitacion/:inv/:guest`
   y `/pase/side/:evento/:guest`, que iattend-events solo reenvía) con número de
-  serie fijo (`inv-…` / `side-…`) y token en `wallet_passes`. Diseño clásico
-  con QR (no "poster": Apple no lo admite con QR). Reverso: "Avisos del
+  serie fijo (`inv-…` / `side-…`) y token en `wallet_passes`. Diseño nuevo de
+  Wallet (iOS 18+) con QR, acordado con pases de prueba en un iPhone (ver el
+  comentario de `generateWalletPass`): foto grande con el QR encima, logo como
+  `primaryLogo` (sin `eventLogoText`: con él sale texto), evento en grande,
+  a la derecha `semantics.seats[0].seatNumber` solo (invitación: su mesa;
+  Flash / side event: el invitado) y abajo `semantics.venueName` (invitación:
+  el invitado; Flash: el lugar). Sin asiento Wallet pone en grande
+  `attendeeName`, por eso no se manda cuando el invitado va abajo. "Additional
+  Ticket Info" = `additionalInfoFields` (invitado, acompañantes, personas,
+  mesa / folio / código). El póster de iOS 26 (guía con clima) no admite QR:
+  sin QR ni NFC Wallet cae al boleto viejo, así que no se usa. Reverso: "Avisos del
   evento" (`changeMessage` → notificación), cada dirección del itinerario con
   nombre del lugar y link a Maps, itinerario y link a la invitación. Varias
   direcciones: todas en el reverso y en `locations` (máx. 10); el lugar
@@ -210,8 +219,10 @@ CLIENT_URL   # presente en .env pero no se referencia en ningún .js actualmente
   digital" de vite; en side events / Flash `body.wallet`) o los de la portada.
   `wallet.enabled === false` = el organizador apagó Apple Wallet: no se genera
   el pase (404). Logo = el actual de I attend
-  (`models/wallet/pass.pass/logo*.png`, de `iattend-vite/public/images/logo_cover.png`,
-  50 pt de alto); el ícono (notificaciones) es la foto del evento en cuadrado.
+  (`models/wallet/pass.pass/logo*.png` y `primaryLogo*.png`, de
+  `iattend-vite/public/images/logo_cover.png`, 50 pt de alto); un solo logo, sin `secondaryLogo`. El ícono (`icon*.png`,
+  notificaciones y pantalla de bloqueo) = la "@" crema sobre el marino de la
+  marca (`#1c3249`); ya no se arma con la foto del evento.
   `POST /api/wallet/actualizar { kind, eventoId }` (vite al publicar) refresca en
   silencio los pases registrados de ese evento, una vez por minuto.
 - No hay tests automatizados (`npm test` es un placeholder que falla) — los

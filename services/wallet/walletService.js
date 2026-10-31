@@ -125,17 +125,24 @@ function credencialesApple() {
 }
 
 /**
- * Generates an Apple Wallet posterEventTicket .pkpass buffer for a guest.
+ * Pase de Apple Wallet de un invitado (.pkpass).
  *
- * Pass layout (iOS 16+):
- *   [logo top-left]          [date / time top-right]
- *   [full-cover event image as background]
- *   [glassmorphic footer]
- *   EVENT NAME
- *   guest name · Mesa X
- *   [QR barcode]
+ * Diseño nuevo de Wallet (iOS 18+), acordado con pases de prueba en un iPhone:
+ *   [logo I attend (primaryLogo)]                 [fecha / hora]
+ *   [foto grande y nítida (background) con el QR encima]
+ *   NOMBRE DEL EVENTO (grande)                    Asiento N (semantics.seats)
+ *   renglón de abajo (semantics.venueName)
+ * Reglas que salieron de las pruebas:
+ *   · Sin QR (o NFC) Wallet cae al diseño viejo: el QR se queda.
+ *   · Con `eventLogoText` sale texto en vez del logo; el logo es `primaryLogo`.
+ *   · Con asiento, el texto grande es el nombre del evento; sin asiento, el
+ *     del invitado (attendeeName). Del asiento solo va `seatNumber`: sección,
+ *     descripción o tipo tapan el nombre.
+ *   · "Additional Ticket Info" = additionalInfoFields.
+ * En iOS viejo sale el boleto clásico (campos primary/secondary/auxiliary).
  *
- * Falls back to a standard eventTicket strip layout on older iOS.
+ * Invitación: asiento = su mesa (si tiene) y abajo el invitado.
+ * Side event / Flash: asiento = el invitado y abajo el lugar.
  *
  * @param {object} data
  * @param {string|number} data.guestId
@@ -162,12 +169,16 @@ function credencialesApple() {
  * @param {string} [data.expirationDate]      ISO: después de esa fecha el pase sale vencido.
  * @param {string} [data.groupingIdentifier]  Agrupa los pases del mismo evento.
  * @param {string} [data.eventStartDate]      ISO, para semantics.
- * @param {{name?: string, latitude?: number, longitude?: number}} [data.venue]
+ * @param {{name?: string, latitude?: number, longitude?: number, region?: string}} [data.venue]
+ * @param {string|number} [data.asiento]     Columna de la derecha ("Seat"/"Asiento"; la etiqueta la pone Apple).
+ * @param {string} [data.textoPie]           Renglón de abajo (semantics.venueName); sin él, el lugar.
+ * @param {{label: string, value: string|number}[]} [data.infoAdicional]  "Additional Ticket Info".
  * @returns {Promise<Buffer>}
  */
 async function generateWalletPass({
     guestId, guestName, eventName, eventDate, eventTime, tableNumber, coverImageUrl, primaryColor, accentColor, auxFields,
     serialNumber, authenticationToken, webServiceURL, backFields, relevantDates, locations, expirationDate, groupingIdentifier, eventStartDate, venue,
+    asiento, textoPie, infoAdicional,
 }) {
     const { p12Buffer, wwdrBuffer, passphrase } = credencialesApple();
 
@@ -207,17 +218,22 @@ async function generateWalletPass({
         // iOS 18+: derive text colors automatically from the background image
         useAutomaticColors: true,
 
-        // iOS 18.1+: branding text next to the logo
-        eventLogoText: 'I attend',
+        // Sin eventLogoText: con él Wallet pone texto en vez del logo
+        // (primaryLogo, en el modelo).
 
         // Structured data for Siri / Spotlight / Wallet search
         semantics: {
             eventName,
             eventType: 'PKEventTypeSocialGathering',
-            attendeeName: guestName,
+            // Sin asiento, Wallet pone en grande attendeeName: si el invitado
+            // ya va abajo (textoPie), no se manda y arriba queda el evento.
+            ...(textoPie ? {} : { attendeeName: guestName }),
             silenceRequested: false,
             ...(eventStartDate ? { eventStartDate } : {}),
-            ...(venue?.name ? { venueName: venue.name } : {}),
+            // Renglón de abajo del diseño nuevo.
+            ...(textoPie || venue?.name ? { venueName: String(textoPie || venue.name) } : {}),
+            ...(venue?.region ? { venueRegionName: venue.region, venueRoom: 'Acceso general' } : {}),
+            ...(asiento != null && asiento !== '' ? { seats: [{ seatNumber: String(asiento) }] } : {}),
             ...(venue?.latitude != null && venue?.longitude != null
                 ? { venueLocation: { latitude: venue.latitude, longitude: venue.longitude } }
                 : {}),
@@ -252,6 +268,13 @@ async function generateWalletPass({
     // QR encodes guestId for scanner verification (side events send "side:<id>")
     pass.setBarcodes(String(guestId));
 
+    // "Additional Ticket Info" del diseño nuevo.
+    if (Array.isArray(infoAdicional)) {
+        infoAdicional.forEach((f, i) => {
+            if (f && f.value != null && f.value !== '') pass.additionalInfoFields.push({ key: `info${i}`, label: String(f.label ?? ''), value: String(f.value) });
+        });
+    }
+
     // Reverso del pase (botón ⓘ): avisos, direcciones, itinerario, links.
     if (Array.isArray(backFields)) {
         backFields.forEach((f) => { if (f && f.key && f.value != null && f.value !== '') pass.backFields.push(f); });
@@ -278,15 +301,11 @@ async function generateWalletPass({
                 .resize({ width: 180 * x, height: 220 * x, fit: 'cover', position: 'attention' }))));
             const miniaturas = await Promise.all(escalas.map((x) => png(sharp(imgBuffer).rotate()
                 .resize({ width: 90 * x, height: 90 * x, fit: 'inside' }))));
-            // Ícono (29 pt, cuadrado): es el que sale en las notificaciones del
-            // pase y en la pantalla de bloqueo; con la foto del evento se
-            // reconoce de quién es el aviso.
-            const iconos = await Promise.all(escalas.map((x) => png(sharp(imgBuffer).rotate()
-                .resize({ width: 29 * x, height: 29 * x, fit: 'cover', position: 'attention' }))));
+            // El ícono (notificaciones y pantalla de bloqueo) es el de
+            // I attend, del modelo; no lleva secondaryLogo (un solo logo).
             ['', '@2x', '@3x'].forEach((sufijo, i) => {
                 pass.addBuffer(`background${sufijo}.png`, fondos[i]);
                 pass.addBuffer(`thumbnail${sufijo}.png`, miniaturas[i]);
-                pass.addBuffer(`icon${sufijo}.png`, iconos[i]);
             });
         } catch (err) {
             console.warn('Could not fetch cover image for pass:', err.message);
