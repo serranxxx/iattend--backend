@@ -47,7 +47,7 @@ const corsOptions = {
         }
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'token', 'vendor-token', 'x-codigo-invitado', 'x-token-registro'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'token', 'vendor-token', 'x-codigo-invitado', 'x-token-registro', 'x-clave-lector'],
 };
 
 app.use(cors(corsOptions));
@@ -109,6 +109,10 @@ app.use('/api/side-events', require('./router/sideEventPublic'));
 app.use('/api/side-events', require('./router/sideEventChat'));
 // Registro de asistentes de un Pop (formulario del organizador; datos sensibles).
 app.use('/api/side-events', require('./router/sideEventForm'));
+// El invitado con su código: entrar, confirmar / rechazar (con acompañantes) y avatar.
+app.use('/api/side-events', require('./router/sideEventInvitado'));
+// Lector de pases de un Pop (vite /scanner?pop=, sin sesión, con su clave).
+app.use('/api/lector', require('./router/lectorPop'));
 // Confirmación en una invitación pública (candado abierto, invitations.type = 'open').
 app.use('/api/invitations', require('./router/invitationPublic'));
 // Limpieza de los archivos temporales del Save the Date gratis
