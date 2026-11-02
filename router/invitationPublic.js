@@ -10,7 +10,7 @@ const router = express.Router();
   candado abierto del header del dashboard en iattend-vite). Sin código de
   invitado: quien abre el link da su nombre y el de sus acompañantes, y aquí
   se dan de alta en `guests` como un pase (titular + acompañantes con
-  companion_id). Mismo flujo que los Flash públicos (sideEventPublic.js).
+  companion_id). Mismo flujo que los Pops públicos (sideEventPublic.js).
   Pasa por el backend (service role) para validar que la invitación de verdad
   sea pública: la anon key no tiene que poder insertar invitados en cualquier
   invitación. La página del invitado (iattend-events, Confirm.tsx) guarda el

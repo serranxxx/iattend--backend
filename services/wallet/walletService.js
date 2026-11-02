@@ -142,7 +142,7 @@ function credencialesApple() {
  * En iOS viejo sale el boleto clásico (campos primary/secondary/auxiliary).
  *
  * Invitación: asiento = su mesa (si tiene) y abajo el invitado.
- * Side event / Flash: asiento = el invitado y abajo el lugar.
+ * Side event / Pop: asiento = el invitado y abajo el lugar.
  *
  * @param {object} data
  * @param {string|number} data.guestId
@@ -155,7 +155,7 @@ function credencialesApple() {
  * @param {string} [data.primaryColor]   CSS color used as pass background (legacy fallback)
  * @param {string} [data.accentColor]    CSS color used for text (legacy fallback)
  * @param {{label: string, value: string|number}[]} [data.auxFields]
- *        Side events / Flash: replace the "Mesa" field (e.g. Personas, Folio).
+ *        Side events / Pop: replace the "Mesa" field (e.g. Personas, Folio).
  *        Omitted for invitations, which keep the table field.
  *
  * Pases que se actualizan (services/wallet/datosPase.js); todos opcionales,

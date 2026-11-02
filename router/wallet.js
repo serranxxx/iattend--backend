@@ -9,6 +9,7 @@ router.post('/pass', generatePass);
 
 // Pase de un invitado leído de Supabase, con número de serie fijo (se actualiza).
 router.get('/pase/invitacion/:invitationId/:guestId', servicio.paseInvitacion);
+// :eventId = código público (o número con link viejo) + header x-codigo-invitado.
 router.get('/pase/side/:eventId/:guestId', servicio.paseSide);
 
 // Bienvenida al escanear (lector de pases de iattend-vite).

@@ -3,13 +3,14 @@ const supabase = require('../config/supabase');
 const { generateWalletPass } = require('../services/wallet/walletService');
 const { datosPaseInvitacion, datosPaseSide, datosPorSerie } = require('../services/wallet/datosPase');
 const { avisarPases, tocarPases } = require('../services/wallet/avisos');
+const { buscarSideEventPorClave, numeroSiempre } = require('../helpers/sideEventClave');
 
 /*
   Pases de Apple Wallet que se actualizan (ver services/wallet/datosPase.js).
 
   Descarga (la piden iattend-events /api/wallet/pass y /api/wallet/side-pass):
     GET /api/wallet/pase/invitacion/:invitationId/:guestId
-    GET /api/wallet/pase/side/:eventId/:guestId
+    GET /api/wallet/pase/side/:clave/:guestId   (header x-codigo-invitado)
 
   Servicio web de PassKit (lo llama Wallet en el iPhone, con
   "Authorization: ApplePass <token>"; la base es WALLET_WEB_SERVICE_URL):
@@ -46,7 +47,34 @@ const generar = async (res, resultado) => {
 };
 
 const paseInvitacion = async (req, res) => generar(res, await datosPaseInvitacion(req.params.invitationId, req.params.guestId));
-const paseSide = async (req, res) => generar(res, await datosPaseSide(req.params.eventId, req.params.guestId));
+// Side event / Pop: el evento por su código público (o el número con link
+// viejo, helpers/sideEventClave.js) y el código del invitado (o el de su
+// titular) en x-codigo-invitado. Con solo los dos números (consecutivos) se
+// podía bajar el pase de cualquiera, y el pase trae su código. La
+// actualización por serie de PassKit (datosPorSerie) no pasa por aquí.
+const paseSide = async (req, res) => {
+    try {
+        const evento = await buscarSideEventPorClave(req.params.eventId, 'id');
+        if (!evento) return res.status(404).json({ ok: false, msg: 'Evento o invitado no encontrado' });
+        const codigo = String(req.get('x-codigo-invitado') ?? '').trim();
+        // Transición: la página vieja de events todavía no manda el código.
+        if (codigo || !numeroSiempre()) {
+            const { data: guest } = await supabase.from('side_events_guests')
+                .select('id, password, companion_id').eq('id', req.params.guestId).eq('side_events_id', evento.id).maybeSingle();
+            let ok = Boolean(guest && codigo && guest.password === codigo);
+            if (guest && codigo && !ok && guest.companion_id) {
+                const { data: titular } = await supabase.from('side_events_guests')
+                    .select('password').eq('id', guest.companion_id).eq('side_events_id', evento.id).maybeSingle();
+                ok = titular?.password === codigo;
+            }
+            if (!ok) return res.status(404).json({ ok: false, msg: 'Evento o invitado no encontrado' });
+        }
+        return generar(res, await datosPaseSide(evento.id, req.params.guestId));
+    } catch (err) {
+        console.error('[wallet] error al validar el pase del side event:', err);
+        return res.status(500).json({ ok: false, msg: 'No se pudo generar el pase' });
+    }
+};
 
 // ── Servicio web de PassKit ────────────────────────────────────────────────
 

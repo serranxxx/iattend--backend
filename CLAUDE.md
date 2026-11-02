@@ -161,6 +161,9 @@ CLIENT_URL   # presente en .env pero no se referencia en ningún .js actualmente
 ```
 
 ## Cosas que hay que saber antes de tocar este repo (gotchas)
+- **Storage de los Pops** (`router/storage.route.js`, `POP_STORAGE`): 5 MB base, niveles 15 y 30 MB a 5 créditos del Pop por MB (la diferencia con el límite actual), mismo precio por MB que la invitación (10 → 30 MB por 100). `POST /api/storage/pop-upgrade { side_event_id, mb }` (organizador del Pop) → RPC `comprar_storage_pop`; uso con `pop_storage_usage`. Migración `migrations/2026-11-01_storage_pops.sql`.
+- **Pops gratis de clientes**: `planner_benefits` acepta cualquier cuenta; a un cliente Admin solo le asigna `free_flash_events` (`editarBeneficiosPlanner` no le toca eventos gratis ni descuento). `GET /api/planner/beneficios` y `POST /api/planner/pop` usan `validarCuenta` (cualquier cuenta activa, `req.esPlanner`): el Pop gratis de un cliente es siempre `destino: 'mio'` y nace con `planner_id` vacío (`crearPopEvent(..., { sinPlanner })`); su `planner_events` lleva el id del cliente y `payload.cliente`.
+- **Pop = el antiguo "Evento Flash"** (renombrado el 2026-11-01 en vite, events y backend). Lo guardado sigue diciendo flash y no se renombra: `planner_benefits.free_flash_events`, RPC `consumir_/devolver_evento_flash_gratis`, `planner_events.kind = 'flash'`, `ventas.plan = 'Flash'`, lookup key de Stripe `flash_event`, carpetas de Storage `flash-<id>` y los nombres de las migraciones. Las rutas `/api/planner/pop/*` tienen alias `/api/planner/flash/*` para el editor que siga desplegado con ellas, y el regreso de Stripe de los créditos de un Pop va a `?flash=` (el editor lee `?pop=` y `?flash=`).
 - Catálogo de planes: tabla `plans` (`migrations/2026-09-25_create_plans_catalog.sql`), editable desde Admin → Planes (`/api/admin/plans`, `validarAdmin`) y expuesta sin auth en `GET /api/plans` con el precio de Stripe incluido. Toda alta o activación de invitación usa `planEntitlements()` / `getPlan()` de `config/plans.js` (caché de 60 s) y copia `credits`, `credits_included` y `side_events_included` a la invitación — **no** volver a escribir `plan === 'pro' ? 300 : 0`. `activatePlan` suma créditos (no sobrescribe) y nunca baja el tope de side events; comprar un side event suelto sube `side_events_included` en 1 y `/api/payment/create-checkout` lo rechaza (403 `SIDE_EVENTS_NOT_ALLOWED`) si el plan tiene `can_buy_side_events = false`.
 - **MongoDB solo existe para `/api/auth`**: en 2026-07 se eliminaron las
   rutas/controllers/models legacy que corrían sobre Mongo para invitaciones,
@@ -194,8 +197,8 @@ CLIENT_URL   # presente en .env pero no se referencia en ningún .js actualmente
   comentario de `generateWalletPass`): foto grande con el QR encima, logo como
   `primaryLogo` (sin `eventLogoText`: con él sale texto), evento en grande,
   a la derecha `semantics.seats[0].seatNumber` solo (invitación: su mesa;
-  Flash / side event: el invitado) y abajo `semantics.venueName` (invitación:
-  el invitado; Flash: el lugar). Sin asiento Wallet pone en grande
+  Pop / side event: el invitado) y abajo `semantics.venueName` (invitación:
+  el invitado; Pop: el lugar). Sin asiento Wallet pone en grande
   `attendeeName`, por eso no se manda cuando el invitado va abajo. "Additional
   Ticket Info" = `additionalInfoFields` (invitado, acompañantes, personas,
   mesa / folio / código). El póster de iOS 26 (guía con clima) no admite QR:
@@ -216,7 +219,7 @@ CLIENT_URL   # presente en .env pero no se referencia en ningún .js actualmente
   migración, el pase sale como antes, sin actualizaciones. `WALLET_CUENTA_REGRESIVA=off`
   apaga la cuenta regresiva.
   Título y foto del pase: `invitation.data.wallet.title` / `.image` (panel "Pase
-  digital" de vite; en side events / Flash `body.wallet`) o los de la portada.
+  digital" de vite; en side events / Pop `body.wallet`) o los de la portada.
   `wallet.enabled === false` = el organizador apagó Apple Wallet: no se genera
   el pase (404). Logo = el actual de I attend
   (`models/wallet/pass.pass/logo*.png` y `primaryLogo*.png`, de

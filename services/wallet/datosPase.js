@@ -286,10 +286,10 @@ async function datosPaseInvitacion(invitationId, guestId) {
     return { datos, fila };
 }
 
-// Side event / Flash: { datos, fila } o null (sin evento, sin fecha o sin confirmar).
+// Side event / Pop: { datos, fila } o null (sin evento, sin fecha o sin confirmar).
 async function datosPaseSide(eventId, guestId) {
     const [{ data: evento }, { data: guest }] = await Promise.all([
-        supabase.from('side_events').select('id, name, body, url_image').eq('id', eventId).maybeSingle(),
+        supabase.from('side_events').select('*').eq('id', eventId).maybeSingle(),
         supabase.from('side_events_guests').select('id, name, state, password, side_events_id')
             .eq('id', guestId).eq('side_events_id', eventId).maybeSingle(),
     ]);
@@ -307,7 +307,7 @@ async function datosPaseSide(eventId, guestId) {
     const acompanantes = await acompanantesDe('side_events_guests', guest.id);
     const personas = 1 + acompanantes.length;
 
-    // Folio del titular en el formulario del Flash.
+    // Folio del titular en el formulario del Pop.
     let folio = null;
     if (body.form?.enabled) {
         const { data: resp } = await supabase.from('side_event_form_responses').select('folio')
@@ -350,7 +350,8 @@ async function datosPaseSide(eventId, guestId) {
     };
     const datos = await completar(base, {
         fila, eventoFecha, fechas, lugares, itinerario,
-        linkInvitacion: `${URL_EVENTOS}/side-event/${evento.id}`,
+        // Código público del evento (no el número): side_events.public_code.
+        linkInvitacion: `${URL_EVENTOS}/side-event/${evento.public_code || evento.id}`,
         grupo: `side-${evento.id}`,
     });
     return { datos, fila };

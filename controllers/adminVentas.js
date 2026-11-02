@@ -4,7 +4,7 @@ const { generateNumericPin } = require('../helpers/simpleId');
 const { conciliarComisionesStripe } = require('../helpers/comisionStripe');
 
 const TIPOS_VENDEDOR_VALIDOS = ['interno', 'externo'];
-// Flash: venta de un Evento Flash (side_event_id, sin invitación).
+// Pop: venta de un Pop (side_event_id, sin invitación).
 const PLANES_VALIDOS = ['PRO', 'Lite', 'Flash'];
 // transferencia pide comprobante de cada abono; digital (Stripe) no.
 const METODOS_PAGO_VALIDOS = ['transferencia', 'digital'];
@@ -170,11 +170,11 @@ const editarVenta = async (req, res = response) => {
     }
 }
 
-// Eventos Flash (side events sin invitación) sin venta, por nombre del evento,
-// correo del cliente o nombre/correo de la planner (un Flash "para enviar
+// Pops (side events sin invitación) sin venta, por nombre del evento,
+// correo del cliente o nombre/correo de la planner (un Pop "para enviar
 // después" no tiene cliente). Van con side_event_id y plan 'Flash' para que el
 // alta manual los distinga.
-const flashSinVenta = async (term) => {
+const popSinVenta = async (term) => {
     const { data: planners } = await supabase
         .from('profiles')
         .select('user_id')
@@ -236,10 +236,10 @@ const buscarInvitacionesSinVenta = async (req, res = response) => {
         [...(byName || []), ...(byEmail || [])].forEach(inv => byId.set(inv.id, inv));
 
         const candidates = [...byId.values()];
-        const flashes = await flashSinVenta(term);
+        const popes = await popSinVenta(term);
 
         if (!candidates.length) {
-            return res.status(200).json({ invitations: flashes });
+            return res.status(200).json({ invitations: popes });
         }
 
         const { data: existingVentas, error: e3 } = await supabase
@@ -252,7 +252,7 @@ const buscarInvitacionesSinVenta = async (req, res = response) => {
         const takenIds = new Set((existingVentas || []).map(v => v.invitation_id));
         const available = candidates.filter(c => !takenIds.has(c.id)).slice(0, 20);
 
-        return res.status(200).json({ invitations: [...available, ...flashes] });
+        return res.status(200).json({ invitations: [...available, ...popes] });
 
     } catch (error) {
         return res.status(500).json({ ok: false, msg: error.message || 'Internal Server Error' });
@@ -261,7 +261,7 @@ const buscarInvitacionesSinVenta = async (req, res = response) => {
 
 const crearVentaManual = async (req, res = response) => {
     const { invitation_id, side_event_id, vendedor_id, precio_acordado, descuento_pct, fecha_venta, metodo_pago } = req.body;
-    // Un Flash (side_event_id) siempre es plan Flash.
+    // Un Pop (side_event_id) siempre es plan Pop.
     const plan = side_event_id ? 'Flash' : req.body.plan;
 
     if (metodo_pago !== undefined && !METODOS_PAGO_VALIDOS.includes(metodo_pago)) {
@@ -273,7 +273,7 @@ const crearVentaManual = async (req, res = response) => {
     }
 
     if (plan === 'Flash' && !side_event_id) {
-        return res.status(400).json({ ok: false, msg: 'El plan Flash es solo para Eventos Flash' });
+        return res.status(400).json({ ok: false, msg: 'El plan Pop es solo para Pops' });
     }
 
     if (!vendedor_id) {
@@ -300,9 +300,9 @@ const crearVentaManual = async (req, res = response) => {
             .maybeSingle();
 
         if (invError) return res.status(500).json({ ok: false, msg: invError.message });
-        if (!evento) return res.status(404).json({ ok: false, msg: side_event_id ? 'Evento Flash no encontrado' : 'Invitación no encontrada' });
+        if (!evento) return res.status(404).json({ ok: false, msg: side_event_id ? 'Pop no encontrado' : 'Invitación no encontrada' });
         if (side_event_id && evento.invitation_id) {
-            return res.status(400).json({ ok: false, msg: 'Ese side event es de una invitación, no un Evento Flash' });
+            return res.status(400).json({ ok: false, msg: 'Ese side event es de una invitación, no un Pop' });
         }
 
         const { data: existing, error: existingError } = await supabase
@@ -312,7 +312,7 @@ const crearVentaManual = async (req, res = response) => {
             .maybeSingle();
 
         if (existingError) return res.status(500).json({ ok: false, msg: existingError.message });
-        if (existing) return res.status(409).json({ ok: false, msg: side_event_id ? 'Este Evento Flash ya tiene una venta registrada' : 'Esta invitación ya tiene una venta registrada' });
+        if (existing) return res.status(409).json({ ok: false, msg: side_event_id ? 'Este Pop ya tiene una venta registrada' : 'Esta invitación ya tiene una venta registrada' });
 
         const { data: vendedor, error: vendedorError } = await supabase
             .from('vendedores')

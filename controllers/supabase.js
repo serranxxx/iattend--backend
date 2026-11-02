@@ -124,9 +124,9 @@ async function processingPayment(session) {
     return;
   }
 
-  // Créditos de un Evento Flash (payment.js → create-checkout con sideEventId).
+  // Créditos de un Pop (payment.js → create-checkout con sideEventId).
   if (!invitationId && session.metadata.sideEventId && product.type === "credits") {
-    await incrementFlashCredits(session.metadata.sideEventId, product.value);
+    await incrementPopCredits(session.metadata.sideEventId, product.value);
     return;
   }
 
@@ -149,15 +149,15 @@ async function processingPayment(session) {
 }
 
 /**
- * Créditos de un Evento Flash (side_events.credits), de un solo golpe
- * (helpers/flashEvent.js → sumarCreditosFlash).
+ * Créditos de un Pop (side_events.credits), de un solo golpe
+ * (helpers/popEvent.js → sumarCreditosPop).
  */
-async function incrementFlashCredits(sideEventId, amount) {
+async function incrementPopCredits(sideEventId, amount) {
   try {
-    const credits = await require("../helpers/flashEvent").sumarCreditosFlash(sideEventId, amount);
-    if (credits == null) console.error("Evento Flash no encontrado para sumar créditos:", sideEventId);
+    const credits = await require("../helpers/popEvent").sumarCreditosPop(sideEventId, amount);
+    if (credits == null) console.error("Pop no encontrado para sumar créditos:", sideEventId);
   } catch (error) {
-    console.error("Error sumando créditos al Evento Flash:", error.message);
+    console.error("Error sumando créditos al Pop:", error.message);
   }
 }
 

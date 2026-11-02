@@ -103,11 +103,11 @@ app.use('/api/webhook', require('./router/webhook'));
 app.use('/api/wallet', require('./router/wallet'));
 app.use('/api/photos', require('./router/photos'));
 app.use('/api/save-the-date', require('./router/saveTheDate'));
-// Confirmación sin código en side events públicos (candado abierto de un Flash)
+// Confirmación sin código en side events públicos (candado abierto de un Pop)
 app.use('/api/side-events', require('./router/sideEventPublic'));
-// Chat de asistentes de un Flash (solo confirmados; el organizador modera).
+// Chat de asistentes de un Pop (solo confirmados; el organizador modera).
 app.use('/api/side-events', require('./router/sideEventChat'));
-// Registro de asistentes de un Flash (formulario del organizador; datos sensibles).
+// Registro de asistentes de un Pop (formulario del organizador; datos sensibles).
 app.use('/api/side-events', require('./router/sideEventForm'));
 // Confirmación en una invitación pública (candado abierto, invitations.type = 'open').
 app.use('/api/invitations', require('./router/invitationPublic'));

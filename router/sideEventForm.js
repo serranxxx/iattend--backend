@@ -1,20 +1,21 @@
 const express = require('express');
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
+const { buscarSideEventPorClave } = require('../helpers/sideEventClave');
 const { crearLimite } = require('../helpers/limiteMemoria');
 const { tieneFuncionesDePlanner } = require('../helpers/roles');
 
 const router = express.Router();
 
 /*
-  Formulario de un Evento Flash (migraciones 2026-10-29c_flash_registro.sql
+  Formulario de un Pop (migraciones 2026-10-29c_flash_registro.sql
   y 2026-10-30_forms.sql; página: iattend-events components/SideEvent/Registro/;
   editor: iattend-vite modules/SideEvents/Formularios/). Reglas:
-  · Existe si el Flash (side event sin invitación) tiene body.form.enabled y
+  · Existe si el Pop (side event sin invitación) tiene body.form.enabled y
     preguntas. Las preguntas salen del snapshot congelado
     (body.form.snapshot) del formulario que eligió el organizador en "Mis
     formularios"; las reglas (scope, allowLater, accepting, folioPrefix) son
-    del Flash. Con accepting = false ya no se reciben respuestas.
+    del Pop. Con accepting = false ya no se reciben respuestas.
   · Responde un invitado confirmado con su código (x-codigo-invitado). Con
     scope "persona" también registra a sus acompañantes confirmados; con
     "grupo", solo él. Un acompañante con link (x-token-registro) registra
@@ -27,6 +28,7 @@ const router = express.Router();
 const limite = crearLimite({ max: 30, ventanaMs: 60 * 1000 });
 const primerNombre = (n) => String(n ?? '').trim().split(/\s+/)[0] || '';
 
+// Organizador (con su sesión): por número.
 const cargarEvento = async (id) => {
     const { data, error } = await supabase
         .from('side_events')
@@ -36,6 +38,10 @@ const cargarEvento = async (id) => {
     if (error) throw error;
     return data;
 };
+
+// Invitado (página pública): por código público, o el número con link viejo
+// (helpers/sideEventClave.js).
+const cargarEventoPublico = (clave) => buscarSideEventPorClave(clave, 'id, invitation_id, body, user_id, planner_id');
 
 const formDe = (evento) => {
     const form = evento && !evento.invitation_id ? evento.body?.form : null;
@@ -124,7 +130,7 @@ const miembroPublico = (g, fila) => ({
 // Quién pide (código o token) y por quiénes puede responder.
 const conRegistro = async (req, res, next) => {
     try {
-        const evento = await cargarEvento(req.params.id);
+        const evento = await cargarEventoPublico(req.params.id);
         const form = formDe(evento);
         if (!form) return res.status(404).json({ ok: false, msg: 'Este evento no tiene formulario' });
 

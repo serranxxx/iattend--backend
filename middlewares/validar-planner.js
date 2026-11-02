@@ -25,4 +25,23 @@ const validarPlanner = async (req, res = response, next) => {
     next();
 };
 
-module.exports = { validarPlanner };
+// Cualquier cuenta activa (cliente, planner o Administración): lo que también
+// puede usar un cliente, hoy sus Pops gratis (Admin → Usuarios › Clientes).
+// Deja lo mismo que validarPlanner más req.esPlanner.
+const validarCuenta = async (req, res = response, next) => {
+    const user = await usuarioDeRequest(req);
+    if (!user) return res.status(401).json({ ok: false, msg: 'Sesión no válida' });
+
+    const { data: perfil, error } = await supabase
+        .from('profiles').select('role, user_email, active').eq('user_id', user.id).maybeSingle();
+    if (error) return res.status(500).json({ ok: false, msg: error.message });
+    if (perfil?.active === false) return res.status(403).json({ ok: false, msg: 'Tu cuenta está desactivada' });
+
+    req.plannerId = user.id;
+    req.plannerEmail = perfil?.user_email || user.email;
+    req.esPlanner = tieneFuncionesDePlanner(perfil?.role);
+    req.esAdmin = perfil?.role === 'Administration';
+    next();
+};
+
+module.exports = { validarPlanner, validarCuenta };

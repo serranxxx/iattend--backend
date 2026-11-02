@@ -12,7 +12,7 @@
 
 const axios = require('axios');
 const supabase = require('../config/supabase');
-const { sumarCreditosFlash } = require('../helpers/flashEvent');
+const { sumarCreditosPop } = require('../helpers/popEvent');
 
 const SEND_INTERVAL_MS = 400;          // ~2.5 msg/s
 const RATE_LIMIT_BACKOFF_MS = 30000;   // pausa cuando Meta reporta rate limit
@@ -250,7 +250,7 @@ const processBatch = async (batchId) => {
         .eq('id', batchId);
 
       if ((finalBatch.failed_count ?? 0) > 0) {
-        // Los créditos salen de la invitación; un Evento Flash (sin
+        // Los créditos salen de la invitación; un Pop (sin
         // invitación) tiene los suyos en side_events.credits.
         if (finalBatch.invitation_id) {
           const { data: inv } = await supabase
@@ -270,10 +270,10 @@ const processBatch = async (batchId) => {
           }
         } else if (finalBatch.side_event_id) {
           try {
-            await sumarCreditosFlash(finalBatch.side_event_id, finalBatch.failed_count);
-            console.log(`[bulk] lote ${batchId}: ${finalBatch.failed_count} créditos reembolsados al Evento Flash`);
+            await sumarCreditosPop(finalBatch.side_event_id, finalBatch.failed_count);
+            console.log(`[bulk] lote ${batchId}: ${finalBatch.failed_count} créditos reembolsados al Pop`);
           } catch (error) {
-            console.error('[bulk] error reembolsando créditos al Evento Flash:', error.message);
+            console.error('[bulk] error reembolsando créditos al Pop:', error.message);
           }
         }
       }

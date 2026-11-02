@@ -5,7 +5,7 @@ const { conciliarComisionesStripe } = require('../helpers/comisionStripe');
 // Compras de planes con Stripe → venta del vendedor "Ecommerce".
 // Lo llama processingPayment (webhook checkout.session.completed) después de
 // crear o activar la invitación, y finalizarEventoPlanner al crear un Evento
-// Flash pagado (venta con side_event_id y plan 'Flash', sin invitación). Nunca lanza: si algo falla, el pago y el plan
+// Pop pagado (venta con side_event_id y plan 'Flash', sin invitación). Nunca lanza: si algo falla, el pago y el plan
 // ya quedaron procesados y solo se registra el error.
 // Ver migrations/2026-09-29_ventas_ecommerce.sql.
 
@@ -33,7 +33,7 @@ async function registrarVentaEcommerce({ invitationId, sideEventId, planName, se
   try {
     const plan = PLAN_DE_VENTA[String(planName).toLowerCase()];
     if (!plan || !(invitationId || sideEventId) || !session?.id) return;
-    // La venta es de la invitación o, en un Flash, del side event.
+    // La venta es de la invitación o, en un Pop, del side event.
     const [columnaEvento, idEvento] = invitationId ? ['invitation_id', invitationId] : ['side_event_id', sideEventId];
 
     // Las sesiones de prueba de Stripe no son ventas (salvo que se pida para

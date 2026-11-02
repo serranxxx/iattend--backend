@@ -1,7 +1,7 @@
 const { welcomeEnvelopeEmail, escapeHtml, SERIF, SANS, INK } = require('./welcomeEnvelope');
 
 // Aviso a un cliente que YA tenía cuenta cuando su planner le asigna un evento
-// (POST /api/planner/eventos/:id/cliente y /api/planner/flash/:id/cliente).
+// (POST /api/planner/eventos/:id/cliente y /api/planner/pop/:id/cliente).
 // Mismo sobre que la bienvenida, sin contraseña: entra con su cuenta.
 function eventSharedEmailTemplate({ nombreEvento, nombrePlanner, email, loginUrl }) {
   const quien = nombrePlanner ? escapeHtml(nombrePlanner) : 'Tu planner';

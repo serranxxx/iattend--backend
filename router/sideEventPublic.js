@@ -1,12 +1,13 @@
 const express = require('express');
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
+const { buscarSideEventPorClave } = require('../helpers/sideEventClave');
 
 const router = express.Router();
 
 /*
   Confirmación en un side event público (`side_events.type = 'open'`, el
-  candado abierto del editor de Flash). Sin código de invitado: quien abre el
+  candado abierto del editor de Pop). Sin código de invitado: quien abre el
   link da su nombre y el de sus acompañantes, y aquí se dan de alta en
   side_events_guests como un pase (titular + acompañantes con companion_id),
   igual que los que importa el organizador. Pasa por el backend (service
@@ -46,7 +47,7 @@ const limpiar = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_
 const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const nuevoCodigo = () => Array.from(crypto.randomBytes(6), b => ALFABETO[b % ALFABETO.length]).join('');
 
-// Avatar con que aparece en "Asistentes" (solo Flash): un emoji y/o un color
+// Avatar con que aparece en "Asistentes" (solo Pop): un emoji y/o un color
 // (índice de la paleta `profiles` de iattend-events, ConfirmCard/profiles.ts;
 // columnas side_events_guests.emoji / .profile). Sin ellos, sus iniciales con
 // un color fijo por invitado.
@@ -63,18 +64,14 @@ const primerNombre = (n) => String(n ?? '').trim().split(/\s+/)[0] || '';
 // Solo letras: "Abuela (Lupita)" → "AL", no "A(".
 const inicialesDe = (n) => String(n ?? '').trim().split(/\s+/).map(p => p.match(/\p{L}/u)?.[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?';
 
-// GET /api/side-events/:id/asistentes
-// Quiénes confirmaron, para el cuadro "Asistentes" de un Flash (side event sin
+// GET /api/side-events/:clave/asistentes  (:clave = public_code, o el número con link viejo)
+// Quiénes confirmaron, para el cuadro "Asistentes" de un Pop (side event sin
 // invitación) que lo tiene prendido (body.showAttendees). Solo primer nombre,
 // iniciales y avatar: nada de teléfonos ni códigos. Más reciente primero.
 router.get('/:id/asistentes', async (req, res) => {
     try {
-        const { data: evento, error } = await supabase
-            .from('side_events')
-            .select('id, invitation_id, body')
-            .eq('id', req.params.id)
-            .maybeSingle();
-        if (error) return res.status(500).json({ ok: false, msg: error.message });
+        // :id = código público del evento (o su número si el link viejo sigue abierto).
+        const evento = await buscarSideEventPorClave(req.params.id, 'id, invitation_id, body');
         if (!evento || evento.invitation_id || !evento.body?.showAttendees) {
             return res.status(404).json({ ok: false, msg: 'Sin asistentes públicos' });
         }
@@ -133,12 +130,7 @@ router.post('/:id/confirmacion-publica', async (req, res) => {
     const conAcompanantes = estado === 'confirmado' ? acompanantes : [];
 
     try {
-        const { data: evento, error } = await supabase
-            .from('side_events')
-            .select('id, type')
-            .eq('id', req.params.id)
-            .maybeSingle();
-        if (error) return res.status(500).json({ ok: false, msg: error.message });
+        const evento = await buscarSideEventPorClave(req.params.id, 'id, type');
         if (!evento) return res.status(404).json({ ok: false, msg: 'Evento no encontrado' });
         if (evento.type !== 'open') return res.status(403).json({ ok: false, msg: 'Este evento es privado' });
 

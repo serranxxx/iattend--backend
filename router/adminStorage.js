@@ -5,7 +5,7 @@
     Lee el agregado de public.admin_storage_stats() (migración
     2026-10-28b_admin_storage_stats.sql) y lo acomoda para el tablero:
     total, por bucket, por tipo de archivo, por área (fotos de eventos,
-    stickers, Flash, catálogo…), crecimiento por mes y uso por evento.
+    stickers, Pop, catálogo…), crecimiento por mes y uso por evento.
     Solo lectura.
 */
 
@@ -22,7 +22,7 @@ const clasificar = (bucket, folder) => {
     if (bucket === 'user_images') {
         if (UUID.test(folder)) return { area: 'event_media', invitation_id: folder };
         if (folder.startsWith('inv-') && UUID.test(folder.slice(4))) return { area: 'stickers', invitation_id: folder.slice(4) };
-        if (folder.startsWith('flash-')) return { area: 'flash', flash_id: folder.slice(6) };
+        if (folder.startsWith('flash-')) return { area: 'pop', pop_id: folder.slice(6) };
         if (folder === 'temp') return { area: 'temp' };
         return { area: 'other_user' };
     }
@@ -62,24 +62,24 @@ router.get('/storage', validarAdmin, async (req, res) => {
             bytes += Number(fila.bytes) || 0;
             sumar(buckets, fila.bucket_id, fila, { bucket: fila.bucket_id });
             sumar(kinds, fila.kind, fila, { kind: fila.kind });
-            const { area, invitation_id, flash_id } = clasificar(fila.bucket_id, fila.folder);
+            const { area, invitation_id, pop_id } = clasificar(fila.bucket_id, fila.folder);
             sumar(areas, area, fila, { area });
             sumar(months, fila.month, fila, { month: fila.month });
 
-            const clave = invitation_id ? `inv:${invitation_id}` : flash_id ? `flash:${flash_id}` : null;
+            const clave = invitation_id ? `inv:${invitation_id}` : pop_id ? `pop:${pop_id}` : null;
             if (clave) {
-                const ev = sumar(eventos, clave, fila, { invitation_id: invitation_id ?? null, flash_id: flash_id ?? null, by_kind: {}, by_area: {} });
+                const ev = sumar(eventos, clave, fila, { invitation_id: invitation_id ?? null, pop_id: pop_id ?? null, by_kind: {}, by_area: {} });
                 ev.by_kind[fila.kind] = (ev.by_kind[fila.kind] ?? 0) + (Number(fila.bytes) || 0);
                 ev.by_area[area] = (ev.by_area[area] ?? 0) + (Number(fila.bytes) || 0);
             }
         }
 
-        // Nombre de los Flash (no son invitaciones; el front no los tiene).
-        const flashIds = [...eventos.values()].map((e) => e.flash_id).filter(Boolean);
-        const nombresFlash = {};
-        if (flashIds.length) {
-            const { data: flashes } = await supabase.from('side_events').select('id, name').in('id', flashIds);
-            (flashes ?? []).forEach((f) => { nombresFlash[f.id] = f.name; });
+        // Nombre de los Pops (no son invitaciones; el front no los tiene).
+        const popIds = [...eventos.values()].map((e) => e.pop_id).filter(Boolean);
+        const nombresPop = {};
+        if (popIds.length) {
+            const { data: popes } = await supabase.from('side_events').select('id, name').in('id', popIds);
+            (popes ?? []).forEach((f) => { nombresPop[f.id] = f.name; });
         }
 
         const orden = (a, b) => b.bytes - a.bytes;
@@ -91,7 +91,7 @@ router.get('/storage', validarAdmin, async (req, res) => {
             areas: [...areas.values()].sort(orden),
             months: [...months.values()].sort((a, b) => String(a.month).localeCompare(String(b.month))),
             events: [...eventos.values()]
-                .map((e) => ({ ...e, flash_name: e.flash_id ? nombresFlash[e.flash_id] ?? null : null }))
+                .map((e) => ({ ...e, pop_name: e.pop_id ? nombresPop[e.pop_id] ?? null : null }))
                 .sort(orden),
         });
     } catch (error) {

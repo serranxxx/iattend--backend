@@ -39,19 +39,19 @@ router.post("/create-checkout", async (req, res) => {
   try {
     const { invitationId, priceId, sideEventId } = req.body;
 
-    // Créditos de un Evento Flash (side event sin invitación): mismo checkout,
-    // los suma el webhook a side_events.credits (supabase.js → incrementFlashCredits).
+    // Créditos de un Pop (side event sin invitación): mismo checkout,
+    // los suma el webhook a side_events.credits (supabase.js → incrementPopCredits).
     if (sideEventId && !invitationId) {
       if (!priceId || PRODUCTS[priceId]?.type !== "credits") {
-        return res.status(400).json({ error: "Solo se pueden comprar créditos para un Evento Flash" });
+        return res.status(400).json({ error: "Solo se pueden comprar créditos para un Pop" });
       }
-      const { data: flash } = await supabase
+      const { data: pop } = await supabase
         .from("side_events")
         .select("id, invitation_id")
         .eq("id", sideEventId)
         .maybeSingle();
-      if (!flash || flash.invitation_id) {
-        return res.status(404).json({ error: "Evento Flash no encontrado" });
+      if (!pop || pop.invitation_id) {
+        return res.status(404).json({ error: "Pop no encontrado" });
       }
 
       const descuento = await descuentoParaCheckout(req);
@@ -61,9 +61,10 @@ router.post("/create-checkout", async (req, res) => {
         ...(descuento.discounts ? { discounts: descuento.discounts } : {}),
         line_items: [{ price: priceId, quantity: 1 }],
         payment_method_options: installmentsOptions(0),
-        metadata: { ...descuento.metadata, sideEventId: String(flash.id), priceId },
-        success_url: `https://www.iattend.site/dashboard/side?flash=${flash.id}&success=true`,
-        cancel_url: `https://www.iattend.site/dashboard/side?flash=${flash.id}&canceled=true`,
+        metadata: { ...descuento.metadata, sideEventId: String(pop.id), priceId },
+        // `?flash=`: lo leen el editor de antes y el de ahora (que también lee `?pop=`).
+        success_url: `https://www.iattend.site/dashboard/side?flash=${pop.id}&success=true`,
+        cancel_url: `https://www.iattend.site/dashboard/side?flash=${pop.id}&canceled=true`,
       });
       return res.status(200).json({ url: session.url });
     }

@@ -5,7 +5,7 @@ const { getPlan } = require('../config/plans');
 const { resolveInstallmentLookupKey, installmentsOptions } = require('../config/stripe.installments');
 const { validarCliente, validarEvento, urlOcupada, resolverCliente, enviarBienvenida, avisarEventoAsignado, crearEventoDeCliente } = require('../helpers/clientEvent');
 const { beneficiosDe, cuponDePorcentaje } = require('../helpers/plannerBenefits');
-const { precioFlash, validarFlash, crearFlashEvent } = require('../helpers/flashEvent');
+const { precioPop, validarPop, crearPopEvent } = require('../helpers/popEvent');
 const { registrarVentaEcommerce } = require('./ventasEcommerce');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
@@ -192,9 +192,9 @@ async function finalizarEventoPlanner(session) {
     const monto = Number(session.amount_total ?? 0) / 100;
 
     try {
-        const esFlash = pendiente.kind === 'flash';
-        const evento = esFlash
-            ? await crearFlashEvent(pendiente.payload, { plannerId: pendiente.planner_id, plannerEmail: pendiente.payload?.plannerEmail })
+        const esPop = pendiente.kind === 'flash';
+        const evento = esPop
+            ? await crearPopEvent(pendiente.payload, { plannerId: pendiente.planner_id, plannerEmail: pendiente.payload?.plannerEmail })
             : await crearEventoDeCliente(pendiente.payload, { plan: pendiente.plan, plannerId: pendiente.planner_id });
         await supabase.from('planner_events').update({
             estado: 'completado',
@@ -205,8 +205,8 @@ async function finalizarEventoPlanner(session) {
             completed_at: new Date().toISOString(),
             error: null,
         }).eq('id', id);
-        // Los Flash pagados se registran como venta de Ecommerce (pago digital).
-        if (esFlash && monto > 0) {
+        // Los Pops pagados se registran como venta de Ecommerce (pago digital).
+        if (esPop && monto > 0) {
             await registrarVentaEcommerce({ sideEventId: evento.sideEventId, planName: 'flash', session });
         }
     } catch (error) {
@@ -218,7 +218,7 @@ async function finalizarEventoPlanner(session) {
                 'Evento de planner pagado que no se pudo crear.',
                 `Motivo: ${error.message}`,
                 pendiente.kind === 'flash'
-                    ? `Evento Flash: ${pendiente.payload?.nombre}`
+                    ? `Pop: ${pendiente.payload?.nombre}`
                     : `URL pedida: ${pendiente.payload?.url_evento}`,
                 `Cliente: ${pendiente.payload?.correo || "(para enviar después)"}`,
                 `Plan: ${pendiente.plan} · Monto: $${monto.toLocaleString('es-MX')}`,
@@ -280,21 +280,22 @@ const asignarCliente = async (req, res = response) => {
     }
 };
 
-// ── Eventos Flash (helpers/flashEvent.js) ──
+// ── Pops (helpers/popEvent.js) ──
 
-// GET /api/planner/flash/precio → precio de lista y el descuento del planner.
-const precioEventoFlash = async (req, res = response) => {
+// GET /api/planner/pop/precio → precio de lista y el descuento del planner.
+const precioEventoPop = async (req, res = response) => {
     try {
-        const [{ amount, currency }, { discount_pct }] = await Promise.all([precioFlash(), beneficiosDe(req.plannerId)]);
+        const [{ amount, currency }, { discount_pct }] = await Promise.all([precioPop(), beneficiosDe(req.plannerId)]);
         return res.json({ ok: true, amount, currency, discount_pct });
     } catch (error) {
         return res.status(500).json({ ok: false, msg: error.message });
     }
 };
 
-// POST /api/planner/flash  — con uno de sus Eventos Flash gratis.
-const crearFlashGratis = async (req, res = response) => {
-    const { error: invalido, datos } = validarFlash(req.body);
+// POST /api/planner/pop  — con uno de sus Pops gratis. También un cliente
+// (validarCuenta): el suyo siempre es para él y no lleva planner.
+const crearPopGratis = async (req, res = response) => {
+    const { error: invalido, datos } = validarPop(req.esPlanner === false ? { ...req.body, destino: 'mio' } : req.body);
     if (invalido) return res.status(400).json({ ok: false, msg: invalido });
 
     try {
@@ -302,12 +303,12 @@ const crearFlashGratis = async (req, res = response) => {
             const { data: hayEvento, error: rpcError } = await supabase
                 .rpc('consumir_evento_flash_gratis', { p_planner_id: req.plannerId });
             if (rpcError) return res.status(500).json({ ok: false, msg: rpcError.message });
-            if (!hayEvento) return res.status(409).json({ ok: false, msg: 'Ya no tienes Eventos Flash gratis disponibles' });
+            if (!hayEvento) return res.status(409).json({ ok: false, msg: 'Ya no tienes Pops gratis disponibles' });
         }
 
-        let flash;
+        let pop;
         try {
-            flash = await crearFlashEvent(datos, { plannerId: req.plannerId, plannerEmail: req.plannerEmail });
+            pop = await crearPopEvent(datos, { plannerId: req.plannerId, plannerEmail: req.plannerEmail, sinPlanner: req.esPlanner === false });
         } catch (error) {
             if (!req.esAdmin) await supabase.rpc('devolver_evento_flash_gratis', { p_planner_id: req.plannerId });
             return res.status(500).json({ ok: false, msg: error.message });
@@ -316,37 +317,37 @@ const crearFlashGratis = async (req, res = response) => {
         const { error: logError } = await supabase.from('planner_events').insert({
             planner_id: req.plannerId,
             kind: 'flash',
-            side_event_id: flash.sideEventId,
+            side_event_id: pop.sideEventId,
             tipo: 'gratis',
             estado: 'completado',
             plan: 'flash',
             monto: 0,
-            payload: { ...datos, ...(req.esAdmin ? { creadoPorAdmin: true } : {}) },
+            payload: { ...datos, ...(req.esAdmin ? { creadoPorAdmin: true } : {}), ...(req.esPlanner === false ? { cliente: true } : {}) },
             completed_at: new Date().toISOString(),
         });
-        if (logError) console.error('No se pudo registrar el Evento Flash gratis:', logError.message);
+        if (logError) console.error('No se pudo registrar el Pop gratis:', logError.message);
 
         return res.status(201).json({
             ok: true,
-            side_event_id: flash.sideEventId,
-            url_publica: flash.urlPublica,
-            cliente_existente: flash.clienteExistente,
-            sin_cliente: flash.sinCliente,
+            side_event_id: pop.sideEventId,
+            url_publica: pop.urlPublica,
+            cliente_existente: pop.clienteExistente,
+            sin_cliente: pop.sinCliente,
         });
     } catch (error) {
         return res.status(500).json({ ok: false, msg: error.message });
     }
 };
 
-// POST /api/planner/flash/checkout — Stripe con su descuento; lo crea el webhook.
-const checkoutFlash = async (req, res = response) => {
-    const { error: invalido, datos } = validarFlash(req.body);
+// POST /api/planner/pop/checkout — Stripe con su descuento; lo crea el webhook.
+const checkoutPop = async (req, res = response) => {
+    const { error: invalido, datos } = validarPop(req.body);
     if (invalido) return res.status(400).json({ ok: false, msg: invalido });
 
     const origen = ORIGENES.test(req.body.origin || '') ? req.body.origin : (process.env.CLIENT_URL || 'https://www.iattend.site');
 
     try {
-        const [{ priceId }, { discount_pct }] = await Promise.all([precioFlash(), beneficiosDe(req.plannerId)]);
+        const [{ priceId }, { discount_pct }] = await Promise.all([precioPop(), beneficiosDe(req.plannerId)]);
 
         const { data: pendiente, error: pendienteError } = await supabase
             .from('planner_events')
@@ -384,36 +385,36 @@ const checkoutFlash = async (req, res = response) => {
 
         return res.json({ ok: true, url: session.url });
     } catch (error) {
-        console.error('Error creando checkout de Evento Flash:', error.message);
+        console.error('Error creando checkout de Pop:', error.message);
         return res.status(500).json({ ok: false, msg: 'No se pudo iniciar el pago' });
     }
 };
 
 /**
- * POST /api/planner/flash/:id/cliente  { correo_cliente, nombre_cliente }
- * Manda a su cliente un Evento Flash creado "para enviar después".
+ * POST /api/planner/pop/:id/cliente  { correo_cliente, nombre_cliente }
+ * Manda a su cliente un Pop creado "para enviar después".
  */
-const asignarClienteFlash = async (req, res = response) => {
+const asignarClientePop = async (req, res = response) => {
     const { error: invalido, cliente } = validarCliente(req.body);
     if (invalido) return res.status(400).json({ ok: false, msg: invalido });
 
     try {
-        const { data: flash, error } = await supabase
+        const { data: pop, error } = await supabase
             .from('side_events')
             .select('id, user_id, planner_id, invitation_id, name')
             .eq('id', req.params.id)
             .maybeSingle();
         if (error) return res.status(500).json({ ok: false, msg: error.message });
-        if (!flash || flash.invitation_id || flash.planner_id !== req.plannerId) {
+        if (!pop || pop.invitation_id || pop.planner_id !== req.plannerId) {
             return res.status(404).json({ ok: false, msg: 'Evento no encontrado' });
         }
-        if (flash.user_id) return res.status(409).json({ ok: false, msg: 'Este evento ya se le envió a un cliente' });
+        if (pop.user_id) return res.status(409).json({ ok: false, msg: 'Este evento ya se le envió a un cliente' });
 
         const cuenta = await resolverCliente(cliente);
         const { data: asignado, error: updateError } = await supabase
             .from('side_events')
             .update({ user_id: cuenta.userId, user_email: cliente.correo })
-            .eq('id', flash.id)
+            .eq('id', pop.id)
             .is('user_id', null)
             .select('id')
             .maybeSingle();
@@ -423,7 +424,7 @@ const asignarClienteFlash = async (req, res = response) => {
         }
 
         if (cuenta.cuentaNueva) await enviarBienvenida(cliente.correo, cuenta.password);
-        else await avisarEventoAsignado({ correo: cliente.correo, plannerId: req.plannerId, nombreEvento: flash.name });
+        else await avisarEventoAsignado({ correo: cliente.correo, plannerId: req.plannerId, nombreEvento: pop.name });
         return res.json({ ok: true, cliente_existente: !cuenta.cuentaNueva });
     } catch (error) {
         return res.status(500).json({ ok: false, msg: error.message });
@@ -432,5 +433,5 @@ const asignarClienteFlash = async (req, res = response) => {
 
 module.exports = {
     beneficios, crearEventoGratis, checkoutEvento, asignarCliente, finalizarEventoPlanner,
-    precioEventoFlash, crearFlashGratis, checkoutFlash, asignarClienteFlash,
+    precioEventoPop, crearPopGratis, checkoutPop, asignarClientePop,
 };

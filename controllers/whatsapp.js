@@ -12,7 +12,7 @@ const sendWhatsappTemplate = async (req, res = express.response) => {
       guestId,
       guestName,
       guestPhone,
-      // side events: id del side event. Un Evento Flash no tiene invitación
+      // side events: id del side event. Un Pop no tiene invitación
       // y llega solo con sideEventId (migración 2026-10-10f_whatsapp_flash.sql).
       sideEventId,
       ...payload
@@ -226,7 +226,7 @@ const createWhatsappBulk = async (req, res = express.response) => {
   try {
     // sideEventId opcional: lote de un side event — los guestId de los items
     // son ids de side_events_guests y el worker marca en esa tabla. Un Evento
-    // Flash manda solo sideEventId (sin invitación).
+    // Pop manda solo sideEventId (sin invitación).
     const { invitationId, sideEventId, items } = req.body;
 
     if ((!invitationId && !sideEventId) || !Array.isArray(items) || items.length === 0) {

@@ -1,14 +1,15 @@
 const express = require('express');
 const supabase = require('../config/supabase');
+const { buscarSideEventPorClave } = require('../helpers/sideEventClave');
 const { crearLimite } = require('../helpers/limiteMemoria');
 const { tieneFuncionesDePlanner } = require('../helpers/roles');
 
 const router = express.Router();
 
 /*
-  Chat de asistentes de un Evento Flash (migración 2026-10-29b_flash_chat.sql;
+  Chat de asistentes de un Pop (migración 2026-10-29b_flash_chat.sql;
   página: iattend-events components/SideEvent/Chat/). Reglas:
-  · Existe si el Flash (side event sin invitación) tiene Asistentes visible
+  · Existe si el Pop (side event sin invitación) tiene Asistentes visible
     (body.showAttendees) y el chat prendido (body.chat.enabled).
   · Solo los invitados que confirmaron leen y escriben. Se identifican con su
     código (header x-codigo-invitado = side_events_guests.password).
@@ -30,6 +31,7 @@ const limiteReacciones = crearLimite({ max: 60, ventanaMs: 60 * 1000 });
 const primerNombre = (n) => String(n ?? '').trim().split(/\s+/)[0] || '';
 const inicialesDe = (n) => String(n ?? '').trim().split(/\s+/).map(p => p.match(/\p{L}/u)?.[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?';
 
+// Organizador (con su sesión): por número.
 const cargarEvento = async (id) => {
     const { data, error } = await supabase
         .from('side_events')
@@ -39,6 +41,10 @@ const cargarEvento = async (id) => {
     if (error) throw error;
     return data;
 };
+
+// Invitado (página pública): por código público, o el número con link viejo
+// (helpers/sideEventClave.js).
+const cargarEventoPublico = (clave) => buscarSideEventPorClave(clave, 'id, invitation_id, body, user_id, planner_id');
 
 const chatActivo = (evento) => Boolean(evento && !evento.invitation_id && evento.body?.showAttendees && evento.body?.chat?.enabled);
 
@@ -75,11 +81,11 @@ const autorPublico = (g) => ({
     titular: g.companion_id ? String(g.companion_id) : null,
 });
 
-// Middleware: el evento existe, es Flash, tiene el chat prendido y quien
+// Middleware: el evento existe, es Pop, tiene el chat prendido y quien
 // pide es un invitado confirmado.
 const conInvitado = async (req, res, next) => {
     try {
-        const evento = await cargarEvento(req.params.id);
+        const evento = await cargarEventoPublico(req.params.id);
         if (!chatActivo(evento)) return res.status(404).json({ ok: false, msg: 'Este evento no tiene chat' });
         const invitado = await invitadoDe(req, evento);
         if (!invitado) return res.status(403).json({ ok: false, msg: 'Solo los confirmados pueden entrar al chat' });
@@ -92,7 +98,7 @@ const conInvitado = async (req, res, next) => {
     }
 };
 
-// Middleware: sesión del organizador del Flash (dueño, planner asignado o Administración).
+// Middleware: sesión del organizador del Pop (dueño, planner asignado o Administración).
 const conOrganizador = async (req, res, next) => {
     const auth = req.header('Authorization');
     const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;

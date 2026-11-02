@@ -5,6 +5,7 @@ const { tieneFuncionesDePlanner } = require('../helpers/roles');
 const { clonarPlantillaNuevoPlanner } = require('../helpers/plannerTemplate');
 const { sendMail } = require('./mailer');
 const { plannerWelcomeEmailTemplate } = require('./templates/plannerWelcomeEmail');
+const { sumarCreditosPop } = require('../helpers/popEvent');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -106,13 +107,13 @@ const beneficiosPlanners = async (req, res = response) => {
 
         const beneficios = Object.fromEntries((filas || []).map(f => [f.planner_id, f]));
         const usados = {};
-        // gratis/compra: eventos regulares; flash: todos sus Flash; flash_gratis:
-        // los Flash que salieron de sus beneficios (Admin → Usuarios › Planners).
+        // gratis/compra: eventos regulares; pop: todos sus Pops; pop_gratis:
+        // los Pops que salieron de sus beneficios (Admin → Usuarios › Planners).
         (eventos || []).forEach(e => {
-            usados[e.planner_id] ??= { gratis: 0, compra: 0, flash: 0, flash_gratis: 0 };
+            usados[e.planner_id] ??= { gratis: 0, compra: 0, pop: 0, pop_gratis: 0 };
             if (e.kind === 'flash') {
-                usados[e.planner_id].flash += 1;
-                if (e.tipo === 'gratis') usados[e.planner_id].flash_gratis += 1;
+                usados[e.planner_id].pop += 1;
+                if (e.tipo === 'gratis') usados[e.planner_id].pop_gratis += 1;
             } else usados[e.planner_id][e.tipo] += 1;
         });
         return res.json({ ok: true, beneficios, usados });
@@ -122,17 +123,18 @@ const beneficiosPlanners = async (req, res = response) => {
 };
 
 // PUT /api/admin/planners/:user_id/beneficios  { free_events, free_flash_events, discount_pct }
+// (a un cliente solo se le asignan Pops gratis: free_flash_events)
 const editarBeneficiosPlanner = async (req, res = response) => {
     const { user_id } = req.params;
-    const freeEvents = Number(req.body?.free_events);
-    const freeFlashEvents = Number(req.body?.free_flash_events ?? 0);
-    const discountPct = Number(req.body?.discount_pct);
+    const freeEvents = Number(req.body?.free_events ?? 0);
+    const freePopEvents = Number(req.body?.free_flash_events ?? 0);
+    const discountPct = Number(req.body?.discount_pct ?? 0);
 
     if (!Number.isInteger(freeEvents) || freeEvents < 0 || freeEvents > 100) {
         return res.status(400).json({ ok: false, msg: 'Eventos gratis debe ser un entero entre 0 y 100' });
     }
-    if (!Number.isInteger(freeFlashEvents) || freeFlashEvents < 0 || freeFlashEvents > 100) {
-        return res.status(400).json({ ok: false, msg: 'Eventos Flash gratis debe ser un entero entre 0 y 100' });
+    if (!Number.isInteger(freePopEvents) || freePopEvents < 0 || freePopEvents > 100) {
+        return res.status(400).json({ ok: false, msg: 'Pops gratis debe ser un entero entre 0 y 100' });
     }
     if (!Number.isInteger(discountPct) || discountPct < 0 || discountPct > 90) {
         return res.status(400).json({ ok: false, msg: 'El descuento debe ser un entero entre 0 y 90' });
@@ -140,15 +142,17 @@ const editarBeneficiosPlanner = async (req, res = response) => {
 
     try {
         const { data: perfil } = await supabase.from('profiles').select('role').eq('user_id', user_id).maybeSingle();
-        if (!tieneFuncionesDePlanner(perfil?.role)) return res.status(400).json({ ok: false, msg: 'Solo se asignan beneficios a cuentas de planner o Administración' });
+        if (!perfil) return res.status(404).json({ ok: false, msg: 'Cuenta no encontrada' });
+        // Pops gratis: a cualquier cuenta (también clientes). Eventos gratis y
+        // descuento: solo planners y Administración; a un cliente no se le tocan.
+        const esPlanner = tieneFuncionesDePlanner(perfil.role);
 
         const { data, error } = await supabase
             .from('planner_benefits')
             .upsert({
                 planner_id: user_id,
-                free_events: freeEvents,
-                free_flash_events: freeFlashEvents,
-                discount_pct: discountPct,
+                ...(esPlanner ? { free_events: freeEvents, discount_pct: discountPct } : {}),
+                free_flash_events: freePopEvents,
                 updated_at: new Date().toISOString(),
                 updated_by: req.adminUserId,
             }, { onConflict: 'planner_id' })
@@ -166,7 +170,7 @@ const editarBeneficiosPlanner = async (req, res = response) => {
  * POST /api/admin/planners  { nombre, correo, genero: 'F' | 'M', enviar_correo }
  * Alta de un wedding planner desde Admin → Usuarios:
  *   1. Cuenta (Auth) con contraseña al azar y perfil con role 'planner'.
- *   2. Beneficios: 1 evento regular gratis y 1 Evento Flash gratis.
+ *   2. Beneficios: 1 evento regular gratis y 1 Pop gratis.
  *   3. Su invitación de ejemplo, copia de la plantilla (helpers/plannerTemplate.js).
  *   4. Con `enviar_correo`, el correo de bienvenida de planner con su acceso
  *      (templates/plannerWelcomeEmail.js). Si no, la contraseña regresa en la
@@ -254,4 +258,26 @@ const crearPlanner = async (req, res = response) => {
     }
 };
 
-module.exports = { editarUsuario, listarProveedores, beneficiosPlanners, editarBeneficiosPlanner, crearPlanner };
+/**
+ * POST /api/admin/pops/:id/creditos  { delta }
+ * Suma (o resta) créditos de WhatsApp a un Pop (side_events.credits) de un
+ * solo golpe (helpers/popEvent.js → sumarCreditosPop): si el organizador
+ * está gastando créditos en ese momento no se pisa su consumo. Nunca baja de 0.
+ */
+const creditosPopAdmin = async (req, res = response) => {
+    const id = Number(req.params.id);
+    const delta = Number(req.body?.delta);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, msg: 'Pop inválido' });
+    if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 100000) {
+        return res.status(400).json({ ok: false, msg: 'Los créditos deben ser un entero distinto de 0' });
+    }
+    try {
+        const credits = await sumarCreditosPop(id, delta);
+        if (credits == null) return res.status(404).json({ ok: false, msg: 'No es un Pop' });
+        return res.json({ ok: true, credits });
+    } catch (error) {
+        return res.status(500).json({ ok: false, msg: error.message });
+    }
+};
+
+module.exports = { editarUsuario, listarProveedores, beneficiosPlanners, editarBeneficiosPlanner, crearPlanner, creditosPopAdmin };
