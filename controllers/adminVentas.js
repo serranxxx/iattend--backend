@@ -411,7 +411,20 @@ const listarVendedores = async (req, res = response) => {
             return res.status(500).json({ ok: false, msg: error.message });
         }
 
-        return res.status(200).json({ vendedores: data || [] });
+        // Su cuenta i attend (por correo): a esa cuenta se le asignan Pops
+        // gratis desde Admin → Usuarios › Vendedores (planner_benefits).
+        const correos = [...new Set((data || []).map(v => v.email?.trim().toLowerCase()).filter(Boolean))];
+        let cuentas = {};
+        if (correos.length) {
+            const { data: perfiles } = await supabase
+                .from('profiles')
+                .select('user_id, user_email')
+                .in('user_email', correos);
+            cuentas = Object.fromEntries((perfiles || []).map(p => [p.user_email?.toLowerCase(), p.user_id]));
+        }
+        const vendedores = (data || []).map(v => ({ ...v, user_id: cuentas[v.email?.trim().toLowerCase()] ?? null }));
+
+        return res.status(200).json({ vendedores });
 
     } catch (error) {
         return res.status(500).json({ ok: false, msg: error.message || 'Internal Server Error' });
