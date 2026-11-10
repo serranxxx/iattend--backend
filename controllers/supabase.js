@@ -82,7 +82,10 @@ async function processingPayment(session) {
   if (!session?.metadata) return;
 
   // Evento que un planner compró para su cliente (controllers/planner.js).
+  // La revisión del plazo solo es la red de seguridad: avisa si un producto
+  // sin meses llegó a meses.
   if (session.metadata.plannerEventId) {
+    await revisarPlazoMSI(session);
     await require("./planner").finalizarEventoPlanner(session);
     return;
   }
@@ -96,8 +99,8 @@ async function processingPayment(session) {
   }
 
   // Price nuevo puesto desde Admin → Planes que todavía no está en
-  // stripe.products.js: se resuelve contra el catálogo. Un price de meses sin
-  // intereses tampoco está ahí: se resuelve por su lookup_key.
+  // stripe.products.js: se resuelve contra el catálogo. El precio a meses de un
+  // plan sale de config/stripe.catalog.js (PRECIO_A_MESES).
   const catalogPlan = PRODUCTS[priceId] ? null : await getPlanByPriceId(priceId);
   const msiPlan = PRODUCTS[priceId] || catalogPlan ? null : await installmentByPriceId(priceId);
   const product = PRODUCTS[priceId]
@@ -105,8 +108,8 @@ async function processingPayment(session) {
     || (msiPlan && { type: "plan", value: msiPlan.planId });
   if (!product) return;
 
-  // Plazo cobrado vs. el del precio. Si no coincide el plan se activa igual
-  // (ya se cobró) y se manda a revisión.
+  // Plazo de meses cobrado (se anota en la venta). Un pago de contado que
+  // aun así llegó a meses se manda a revisión.
   const plazo = await revisarPlazoMSI(session);
 
   // Preview/checkout flow: create invitation from queued data after payment
@@ -121,6 +124,8 @@ async function processingPayment(session) {
       const nuevaId = await createInvitationWithPlan(userId, product.value, session.metadata);
       await registrarVentaEcommerce({ invitationId: nuevaId, planName: product.value, session, plazo });
     }
+    // Pop / Buckets: Pops gratis para la cuenta que compró.
+    if (product.type === "pops") await sumarPopsGratis(userId, product.value);
     return;
   }
 
@@ -145,6 +150,33 @@ async function processingPayment(session) {
       break;
     default:
       break;
+  }
+}
+
+/**
+ * Pops gratis para una cuenta (planner_benefits.free_flash_events): el Pop
+ * suelto suma 1, los Buckets 5 o 10. Crea su fila si no tenía.
+ */
+async function sumarPopsGratis(cuentaId, cantidad) {
+  try {
+    const { data: fila, error } = await supabase
+      .from("planner_benefits")
+      .select("free_flash_events")
+      .eq("planner_id", cuentaId)
+      .maybeSingle();
+    if (error) throw error;
+
+    const resultado = fila
+      ? await supabase
+        .from("planner_benefits")
+        .update({ free_flash_events: (fila.free_flash_events ?? 0) + cantidad, updated_at: new Date().toISOString() })
+        .eq("planner_id", cuentaId)
+      : await supabase
+        .from("planner_benefits")
+        .insert({ planner_id: cuentaId, free_flash_events: cantidad });
+    if (resultado.error) throw resultado.error;
+  } catch (error) {
+    console.error("Error sumando Pops gratis:", cuentaId, cantidad, error.message);
   }
 }
 

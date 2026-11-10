@@ -1,20 +1,21 @@
 const Stripe = require('stripe');
 const supabase = require('../config/supabase');
 const { sendMail } = require('./mailer');
+const { permiteMsi } = require('../config/stripe.catalog');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Revisión del plazo de meses sin intereses de un pago (webhook
-// checkout.session.completed). Checkout no deja fijar el plazo; los montos
-// mínimos por plazo del Dashboard de Stripe impiden elegir más meses de los
-// pagados, pero sí se pueden elegir menos (el price de 12 deja 3, 6 o 12). Aquí
-// se compara lo cobrado contra lo que dice el price (`metadata.msiMonths`,
-// 0 = contado).
+// checkout.session.completed). Desde el 10 nov 2026 un producto con meses
+// (`PRODUCTOS_CON_MSI` en config/stripe.catalog.js, o `metadata.aMeses`) deja
+// elegir cualquier plazo en Stripe: se anota el que se cobró y ya. Red de
+// seguridad: un producto sin meses lleva los meses apagados en su Checkout
+// Session (y Stripe no los ofrece debajo de $4,000); si aun así llegó a meses,
+// el plan se activa igual (ya se cobró), queda un reporte para reembolso
+// manual en Admin → Buzón → Reportes (support_tickets) y sale correo a soporte.
 //
-// Menos meses que los pagados no le cuesta a I attend: solo se anota. Más
-// meses (los rangos de Stripe dejaron de cuadrar) sí: el plan se activa igual
-// (ya se cobró), queda un reporte en Admin → Buzón → Reportes
-// (support_tickets) y sale correo a soporte.
+// Las sesiones de antes traen `metadata.msiMonths` (un precio por plazo): se
+// revisan como antes, más meses que los del precio = aviso.
 // Nunca lanza: un error aquí no puede frenar la activación del plan.
 
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'contacto.iattend@gmail.com';
@@ -37,7 +38,7 @@ async function avisarDescuadre(session, esperado, cobrado) {
     const { metadata = {} } = session;
     const monto = Number(session.amount_total ?? 0) / 100;
     const body = [
-        'Pago con más meses que los del precio (meses sin intereses).',
+        'Pago con más meses que los del precio (meses sin intereses). Si el producto es de contado, sus meses debían ir apagados en el Checkout: revisar para reembolso manual de la comisión.',
         `Precio elegido: ${plazoTexto(esperado)}${metadata.lookupKey ? ` (${metadata.lookupKey})` : ''}`,
         `Plazo cobrado en Stripe: ${plazoTexto(cobrado)}`,
         `Monto: $${monto.toLocaleString('es-MX')} ${String(session.currency || '').toUpperCase()}`,
@@ -65,7 +66,7 @@ async function avisarDescuadre(session, esperado, cobrado) {
     if (error) console.error('No se pudo guardar el aviso de plazo MSI:', error.message);
 
     try {
-        await sendMail(SUPPORT_EMAIL, '[Pagos] Plazo MSI más largo que el del precio', `<p style="white-space:pre-wrap">${body}</p>`);
+        await sendMail(SUPPORT_EMAIL, '[Pagos] Pago a meses de un producto sin meses (revisar reembolso)', `<p style="white-space:pre-wrap">${body}</p>`);
         if (guardado) await supabase.from('support_tickets').update({ email_sent: true }).eq('id', guardado.id);
     } catch (mailError) {
         console.error('No se pudo mandar el correo del aviso de plazo MSI:', mailError.message);
@@ -76,10 +77,15 @@ async function avisarDescuadre(session, esperado, cobrado) {
  * Devuelve { esperado, cobrado, coincide } (cobrado null si no se pudo leer).
  */
 async function revisarPlazoMSI(session) {
-    const esperado = Number(session?.metadata?.msiMonths || 0);
+    let esperado = Number(session?.metadata?.msiMonths || 0);
     try {
+        const aMeses = session?.metadata?.aMeses === '1'
+            || (!session?.metadata?.msiMonths && await permiteMsi(session?.metadata?.priceId));
         const cobrado = await mesesCobrados(session);
         if (cobrado === null) return { esperado, cobrado, coincide: true };
+
+        // A meses: el plazo que eligió en Stripe es el bueno.
+        if (aMeses) esperado = cobrado;
 
         const coincide = cobrado === esperado;
         if (cobrado > esperado) {

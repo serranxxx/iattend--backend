@@ -5,7 +5,7 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const { createInvitationWithPlan, createCheckoutQueue } = require("./supabase");
 const { PLAN_PRICES, PRODUCTS } = require("../config/stripe.products");
 const { getPlan, getPlanByPriceId } = require("../config/plans");
-const { resolveInstallmentLookupKey, installmentsOptions } = require("../config/stripe.installments");
+const { resolveInstallmentLookupKey, opcionesDePago } = require("../config/stripe.installments");
 const { descuentoParaCheckout } = require("../helpers/plannerBenefits");
 
 // Un price de plan es válido si está en la lista histórica o si es el que el
@@ -14,23 +14,23 @@ const esPrecioDePlan = async (priceId) =>
   PLAN_PRICES.includes(priceId) || Boolean(await getPlanByPriceId(priceId));
 const supabase = require("../config/supabase");
 
-// Precio a cobrar por un plan. Con `lookupKey` es un plazo a meses sin
-// intereses: el price sale de Stripe por su lookup_key (el cliente nunca manda
-// el price de MSI). Sin él es contado y el priceId tiene que ser de un plan.
-// Devuelve { priceId, months } o { error }.
+// Precio a cobrar por un plan. Con `lookupKey` (`pro_meses`) es el precio a
+// meses del plan (el cliente nunca manda ese price; el plazo lo elige en
+// Stripe). Sin él es contado y el priceId tiene que ser de un plan.
+// Devuelve { priceId, aMeses, lookupKey } o { error }.
 const resolverPrecioDePlan = async ({ priceId, lookupKey }) => {
   if (lookupKey) {
     const msi = await resolveInstallmentLookupKey(lookupKey);
-    if (!msi) return { error: "Plazo de meses sin intereses no válido" };
-    return { priceId: msi.priceId, months: msi.months, lookupKey };
+    if (!msi) return { error: "Pago a meses no disponible para este plan" };
+    return { priceId: msi.priceId, aMeses: true, lookupKey };
   }
   if (!(await esPrecioDePlan(priceId))) return { error: "priceId no válido para un plan" };
-  return { priceId, months: 0 };
+  return { priceId, aMeses: false };
 };
 
-// Metadata del plazo: el webhook la compara con el plazo que de verdad se cobró.
-const metadataPlazo = ({ months, lookupKey }) =>
-  months ? { msiMonths: String(months), lookupKey } : {};
+// Metadata del pago a meses: el webhook anota el plazo que se cobró.
+const metadataPlazo = ({ aMeses, lookupKey }) =>
+  aMeses ? { aMeses: "1", lookupKey } : {};
 
 /**
  * Crear sesión de Checkout
@@ -60,7 +60,7 @@ router.post("/create-checkout", async (req, res) => {
         mode: "payment",
         ...(descuento.discounts ? { discounts: descuento.discounts } : {}),
         line_items: [{ price: priceId, quantity: 1 }],
-        payment_method_options: installmentsOptions(0),
+        payment_method_options: await opcionesDePago(priceId),
         metadata: { ...descuento.metadata, sideEventId: String(pop.id), priceId },
         // `?flash=`: lo leen el editor de antes y el de ahora (que también lee `?pop=`).
         success_url: `https://www.iattend.site/dashboard/side?flash=${pop.id}&success=true`,
@@ -108,7 +108,7 @@ router.post("/create-checkout", async (req, res) => {
           quantity: 1,
         },
       ],
-      payment_method_options: installmentsOptions(0),
+      payment_method_options: await opcionesDePago(priceId),
 
       metadata: {
         ...descuento.metadata,
@@ -155,7 +155,7 @@ router.post("/create-checkout-invitation", async (req, res) => {
       mode: "payment",
       ...(descuento.discounts ? { discounts: descuento.discounts } : {}),
       line_items: [{ price: priceId, quantity: 1 }],
-      payment_method_options: installmentsOptions(precio.months),
+      payment_method_options: await opcionesDePago(precio.priceId),
       metadata: {
         ...descuento.metadata,
         priceId,
@@ -199,7 +199,7 @@ router.post("/create-checkout-plan", async (req, res) => {
       mode: "payment",
       ...(descuento.discounts ? { discounts: descuento.discounts } : {}),
       line_items: [{ price: priceId, quantity: 1 }],
-      payment_method_options: installmentsOptions(precio.months),
+      payment_method_options: await opcionesDePago(precio.priceId),
       metadata: {
         ...descuento.metadata,
         userId,
@@ -246,7 +246,7 @@ router.post("/create-checkout-preview", async (req, res) => {
       mode: "payment",
       ...(descuento.discounts ? { discounts: descuento.discounts } : {}),
       line_items: [{ price: priceId, quantity: 1 }],
-      payment_method_options: installmentsOptions(precio.months),
+      payment_method_options: await opcionesDePago(precio.priceId),
       metadata: {
         ...descuento.metadata,
         queueId,
@@ -282,7 +282,7 @@ router.post("/create-checkout-gift", async (req, res) => {
       mode: "payment",
       ...(descuento.discounts ? { discounts: descuento.discounts } : {}),
       line_items: [{ price: priceId, quantity: 1 }],
-      payment_method_options: installmentsOptions(0),
+      payment_method_options: await opcionesDePago(priceId),
       metadata: {
         ...descuento.metadata,
         giftType: "gift",

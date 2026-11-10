@@ -2,7 +2,7 @@ const { response } = require('express');
 const Stripe = require('stripe');
 const supabase = require('../config/supabase');
 const { getPlan } = require('../config/plans');
-const { resolveInstallmentLookupKey, installmentsOptions } = require('../config/stripe.installments');
+const { resolveInstallmentLookupKey, opcionesDePago } = require('../config/stripe.installments');
 const { validarCliente, validarEvento, urlOcupada, resolverCliente, enviarBienvenida, avisarEventoAsignado, crearEventoDeCliente } = require('../helpers/clientEvent');
 const { beneficiosDe, cuponDePorcentaje } = require('../helpers/plannerBenefits');
 const { precioPop, validarPop, crearPopEvent } = require('../helpers/popEvent');
@@ -96,16 +96,16 @@ const checkoutEvento = async (req, res = response) => {
             return res.status(409).json({ ok: false, msg: 'La URL del evento ya está en uso' });
         }
 
-        // Precio: contado (el del catálogo) o un plazo de meses del mismo plan.
+        // Precio: contado (el del catálogo) o el precio a meses del mismo plan
+        // (`{plan}_meses`; el plazo lo elige el cliente en Stripe).
         let priceId;
-        let months = 0;
+        let aMeses = false;
         const { lookupKey } = req.body;
         if (lookupKey) {
-            if (!String(lookupKey).startsWith(`${plan}_msi_`)) return res.status(400).json({ ok: false, msg: 'Plazo no válido para este plan' });
             const msi = await resolveInstallmentLookupKey(lookupKey);
-            if (!msi) return res.status(400).json({ ok: false, msg: 'Plazo de meses sin intereses no válido' });
+            if (!msi || msi.planId !== plan) return res.status(400).json({ ok: false, msg: 'Pago a meses no disponible para este plan' });
             priceId = msi.priceId;
-            months = msi.months;
+            aMeses = true;
         } else {
             priceId = (await getPlan(plan))?.stripe_price_id;
             if (!priceId) return res.status(500).json({ ok: false, msg: 'El plan no tiene precio configurado' });
@@ -131,7 +131,7 @@ const checkoutEvento = async (req, res = response) => {
             payment_method_types: ['card'],
             mode: 'payment',
             line_items: [{ price: priceId, quantity: 1 }],
-            payment_method_options: installmentsOptions(months),
+            payment_method_options: await opcionesDePago(priceId),
             ...(discount_pct ? { discounts: [{ coupon: await cuponDePorcentaje(discount_pct) }] } : {}),
             customer_email: req.plannerEmail || undefined,
             metadata: {
@@ -139,7 +139,7 @@ const checkoutEvento = async (req, res = response) => {
                 plannerId: req.plannerId,
                 userEmail: req.plannerEmail || '',
                 priceId,
-                ...(months ? { msiMonths: String(months), lookupKey } : {}),
+                ...(aMeses ? { aMeses: '1', lookupKey } : {}),
                 ...(discount_pct ? { plannerDiscountPct: String(discount_pct) } : {}),
             },
             success_url: `${origen}/invitations?evento_planner=ok`,
@@ -373,6 +373,8 @@ const checkoutPop = async (req, res = response) => {
             payment_method_types: ['card'],
             mode: 'payment',
             line_items: [{ price: priceId, quantity: 1 }],
+            // El Pop suelto es de contado: sin esto Checkout ofrece meses.
+            payment_method_options: await opcionesDePago(priceId),
             ...(discount_pct ? { discounts: [{ coupon: await cuponDePorcentaje(discount_pct) }] } : {}),
             customer_email: req.plannerEmail || undefined,
             metadata: {

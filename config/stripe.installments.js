@@ -1,116 +1,66 @@
 // ── Meses sin intereses (MSI) ────────────────────────────────────────────────
-// Plazos que se venden por plan. Cada plazo es un price propio en Stripe, más
-// caro que el de contado para cubrir la comisión extra de MSI, y se busca por
-// `lookup_key` (`{plan}_msi_{meses}`): el monto nunca se escribe aquí, sale de
-// Stripe igual que el precio de contado.
+// Desde el 10 nov 2026 cada plan con meses tiene UN precio "a meses" (más caro
+// que el de contado para cubrir la comisión) y el cliente elige el plazo en
+// Stripe Checkout: Stripe no deja fijar el plazo por precio ni por producto.
+// El catálogo y la regla de qué productos ofrecen meses viven en
+// config/stripe.catalog.js. Ver docs/meses-sin-intereses.md en iattend-vite.
 //
-// Ojo: en Checkout Session el plazo NO queda ligado al price
-// (`installments` solo acepta `enabled`). Lo acotan los montos mínimos por
-// plazo del Dashboard de Stripe (3 meses desde $4,269, 6 desde $4,399, 12 desde
-// $4,700): nadie puede elegir más meses de los que pagó. Si cambian precios o
-// se agregan plazos, hay que revisar que sigan cuadrando con esos rangos. El
-// webhook avisa si aun así llega un plazo más largo.
-// Ver docs/meses-sin-intereses.md en iattend-vite.
+// Los fronts piden "a meses" con `lookupKey = '{plan}_meses'`. Los
+// `{plan}_msi_{meses}` de antes (un precio por plazo) se siguen aceptando y
+// caen en el mismo precio a meses, por si queda un front viejo en caché.
 
-const Stripe = require('stripe');
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
-
-// Lite solo se vende de contado (sus prices lite_msi_* están archivados).
-const MSI_TERMS = {
-    pro: [3, 6, 12],
-};
-
-const lookupKeyOf = (planId, months) => `${planId}_msi_${months}`;
-
-// lookup_key → { planId, months }
-const TERM_BY_LOOKUP_KEY = Object.fromEntries(
-    Object.entries(MSI_TERMS).flatMap(([planId, terms]) =>
-        terms.map(months => [lookupKeyOf(planId, months), { planId, months }])
-    )
-);
-
-const CACHE_MS = 5 * 60 * 1000;
-let cache = null;
-let cacheAt = 0;
-
-// lookup_key → price de Stripe (solo los activos).
-async function msiPrices() {
-    if (cache && Date.now() - cacheAt < CACHE_MS) return cache;
-
-    try {
-        const { data } = await stripe.prices.list({
-            lookup_keys: Object.keys(TERM_BY_LOOKUP_KEY),
-            active: true,
-            limit: 100,
-        });
-        cache = new Map(data.map(price => [price.lookup_key, price]));
-        cacheAt = Date.now();
-    } catch (error) {
-        console.error('Error obteniendo precios MSI:', error.message);
-        // Mejor el último catálogo conocido que dejar de ofrecer MSI.
-        if (!cache) return new Map();
-    }
-    return cache;
-}
+const { PRECIO_A_MESES, PLAZOS_MSI, precioDeStripe, opcionesDePago } = require('./stripe.catalog');
 
 const centavos = (n) => Math.round(n * 100) / 100;
 
+const lookupKeyDe = (planId) => `${planId}_meses`;
+
 /**
- * Plazos disponibles de un plan para los fronts:
- * [{ months, amount, monthly, currency, lookup_key }]. Sin price activo en
- * Stripe, el plazo no se ofrece.
+ * Pago a meses de un plan para los fronts (GET /api/plans):
+ * [{ months, amount, monthly, currency, lookup_key, plazos }] con una sola
+ * entrada: `months` es el plazo más largo (para "hasta 12 pagos de $375") y
+ * `plazos` todos los que se anuncian. [] si el plan no tiene precio a meses
+ * activo. Se deja en arreglo por compatibilidad con los fronts de antes.
  */
 async function installmentsFor(planId) {
-    const terms = MSI_TERMS[planId] ?? [];
-    if (!terms.length) return [];
+    const price = await precioDeStripe(PRECIO_A_MESES[planId]);
+    if (!price?.active || !price.unit_amount) return [];
 
-    const prices = await msiPrices();
-    return terms
-        .map(months => {
-            const lookup_key = lookupKeyOf(planId, months);
-            const price = prices.get(lookup_key);
-            if (!price?.unit_amount) return null;
-            const amount = price.unit_amount / 100;
-            return {
-                months,
-                amount,
-                monthly: centavos(amount / months),
-                currency: price.currency,
-                lookup_key,
-            };
-        })
-        .filter(Boolean);
+    const amount = price.unit_amount / 100;
+    const months = Math.max(...PLAZOS_MSI);
+    return [{
+        months,
+        amount,
+        monthly: centavos(amount / months),
+        currency: price.currency,
+        lookup_key: lookupKeyDe(planId),
+        plazos: PLAZOS_MSI.map((m) => ({ months: m, monthly: centavos(amount / m) })),
+    }];
 }
 
-/** Resuelve un lookup_key a { priceId, planId, months } o null si no es MSI. */
+/**
+ * Resuelve el lookupKey que manda el front (`pro_meses`, o el viejo
+ * `pro_msi_6`) a { priceId, planId } del precio a meses, o null.
+ */
 async function resolveInstallmentLookupKey(lookupKey) {
-    const term = TERM_BY_LOOKUP_KEY[lookupKey];
-    if (!term) return null;
-    const price = (await msiPrices()).get(lookupKey);
-    if (!price) return null;
-    return { priceId: price.id, ...term };
-}
-
-/** Plazo MSI al que pertenece un price id ({ planId, months, lookupKey }) o null. */
-async function installmentByPriceId(priceId) {
+    const match = String(lookupKey || '').match(/^([a-z]+)_(?:meses|msi_\d+)$/);
+    const planId = match?.[1];
+    const priceId = PRECIO_A_MESES[planId];
     if (!priceId) return null;
-    for (const [lookupKey, price] of await msiPrices()) {
-        if (price.id === priceId) return { ...TERM_BY_LOOKUP_KEY[lookupKey], lookupKey };
-    }
-    return null;
+    const price = await precioDeStripe(priceId);
+    if (!price?.active) return null;
+    return { priceId, planId };
 }
 
-// Opciones de tarjeta para la sesión: MSI solo con un price de MSI. En contado
-// se apaga explícito, porque si se prende MSI en el Dashboard de Stripe,
-// Checkout lo ofrecería en todas las sesiones.
-const installmentsOptions = (months) => ({
-    card: { installments: { enabled: Boolean(months) } },
-});
+/** Plan del precio a meses vigente ({ planId }) o null. Para el webhook. */
+async function installmentByPriceId(priceId) {
+    const planId = Object.keys(PRECIO_A_MESES).find((p) => PRECIO_A_MESES[p] === priceId);
+    return planId ? { planId } : null;
+}
 
 module.exports = {
-    MSI_TERMS,
     installmentsFor,
     resolveInstallmentLookupKey,
     installmentByPriceId,
-    installmentsOptions,
+    opcionesDePago,
 };
