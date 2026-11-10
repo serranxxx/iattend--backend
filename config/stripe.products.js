@@ -13,8 +13,16 @@ const PRICE_IDS = {
   // Plans
   PLAN_PAPERLESS:   'price_1SkRvtAAdNlITNVbj8BA6F2Q',
   PLAN_LITE:        'price_1Tl9jyAAdNlITNVbm0hq6omU',   // $2,899
-  PLAN_PRO:         'price_1Tl9fQAAdNlITNVb953oCZLs',   // $3,999
+  PLAN_PRO:         'price_1UaFaqAAdNlITNVb73fqH4yd',   // $3,999 — producto "PRO - Contado"
+  PLAN_PRO_OLD:     'price_1Tl9fQAAdNlITNVb953oCZLs',   // producto PRO anterior — keep for webhook history
   PLAN_PRO_TEST:    'price_1TO1kjAAdNlITNVbmfuaY1nm',   // legacy test ID kept for webhook history
+
+  // Meses sin intereses de PRO anteriores (producto PRO viejo). Los vigentes se
+  // resuelven por lookup_key (config/stripe.installments.js); estos solo quedan
+  // para el webhook de sesiones abiertas antes del cambio.
+  PRO_MSI_3_OLD:    'price_1UP9yXAAdNlITNVbWGfRcHXg',   // $4,349
+  PRO_MSI_6_OLD:    'price_1UP9ysAAdNlITNVbvhFJ46TU',   // $4,499
+  PRO_MSI_12_OLD:   'price_1UP9zVAAdNlITNVbHvAgKL0R',   // $4,799
 
   // Upgrade
   UPGRADE_TO_PRO:   'price_1TlC4RAAdNlITNVbjcRtexSy',
@@ -35,7 +43,11 @@ const PRODUCTS = {
   [PRICE_IDS.PLAN_PAPERLESS]:  { type: 'plan', value: 'paperless' },
   [PRICE_IDS.PLAN_LITE]:       { type: 'plan', value: 'lite' },
   [PRICE_IDS.PLAN_PRO]:        { type: 'plan', value: 'pro' },
+  [PRICE_IDS.PLAN_PRO_OLD]:    { type: 'plan', value: 'pro' },
   [PRICE_IDS.PLAN_PRO_TEST]:   { type: 'plan', value: 'pro' },
+  [PRICE_IDS.PRO_MSI_3_OLD]:   { type: 'plan', value: 'pro' },
+  [PRICE_IDS.PRO_MSI_6_OLD]:   { type: 'plan', value: 'pro' },
+  [PRICE_IDS.PRO_MSI_12_OLD]:  { type: 'plan', value: 'pro' },
 
   [PRICE_IDS.UPGRADE_TO_PRO]:  { type: 'plan', value: 'pro' },
 
