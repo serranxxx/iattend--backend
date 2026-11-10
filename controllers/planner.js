@@ -40,8 +40,10 @@ const crearEventoGratis = async (req, res = response) => {
             return res.status(409).json({ ok: false, msg: 'La URL del evento ya está en uso' });
         }
 
-        // Administración crea sin costo y sin gastar eventos gratis.
-        if (!req.esAdmin) {
+        // Se gasta un evento gratis, también si es Administración; solo su
+        // botón "Crear sin costo" (sin_costo) crea sin gastar ninguno.
+        const gastaGratis = !(req.esAdmin && req.body?.sin_costo === true);
+        if (gastaGratis) {
             const { data: hayEvento, error: rpcError } = await supabase
                 .rpc('consumir_evento_gratis', { p_planner_id: req.plannerId });
             if (rpcError) return res.status(500).json({ ok: false, msg: rpcError.message });
@@ -52,7 +54,7 @@ const crearEventoGratis = async (req, res = response) => {
         try {
             evento = await crearEventoDeCliente(datos, { plan: 'pro', plannerId: req.plannerId });
         } catch (error) {
-            if (!req.esAdmin) await supabase.rpc('devolver_evento_gratis', { p_planner_id: req.plannerId });
+            if (gastaGratis) await supabase.rpc('devolver_evento_gratis', { p_planner_id: req.plannerId });
             return res.status(error.status || 500).json({ ok: false, msg: error.message });
         }
 
@@ -299,7 +301,10 @@ const crearPopGratis = async (req, res = response) => {
     if (invalido) return res.status(400).json({ ok: false, msg: invalido });
 
     try {
-        if (!req.esAdmin) {
+        // Se gasta un Pop gratis, también si es Administración; solo su botón
+        // "Crear sin costo" (sin_costo) crea sin gastar ninguno.
+        const gastaGratis = !(req.esAdmin && req.body?.sin_costo === true);
+        if (gastaGratis) {
             const { data: hayEvento, error: rpcError } = await supabase
                 .rpc('consumir_evento_flash_gratis', { p_planner_id: req.plannerId });
             if (rpcError) return res.status(500).json({ ok: false, msg: rpcError.message });
@@ -310,7 +315,7 @@ const crearPopGratis = async (req, res = response) => {
         try {
             pop = await crearPopEvent(datos, { plannerId: req.plannerId, plannerEmail: req.plannerEmail, sinPlanner: req.esPlanner === false });
         } catch (error) {
-            if (!req.esAdmin) await supabase.rpc('devolver_evento_flash_gratis', { p_planner_id: req.plannerId });
+            if (gastaGratis) await supabase.rpc('devolver_evento_flash_gratis', { p_planner_id: req.plannerId });
             return res.status(500).json({ ok: false, msg: error.message });
         }
 
@@ -322,7 +327,7 @@ const crearPopGratis = async (req, res = response) => {
             estado: 'completado',
             plan: 'flash',
             monto: 0,
-            payload: { ...datos, ...(req.esAdmin ? { creadoPorAdmin: true } : {}), ...(req.esPlanner === false ? { cliente: true } : {}) },
+            payload: { ...datos, ...(req.esAdmin ? { creadoPorAdmin: true } : {}), ...(!gastaGratis ? { sinCosto: true } : {}), ...(req.esPlanner === false ? { cliente: true } : {}) },
             completed_at: new Date().toISOString(),
         });
         if (logError) console.error('No se pudo registrar el Pop gratis:', logError.message);
