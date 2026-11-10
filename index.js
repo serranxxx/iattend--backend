@@ -140,6 +140,7 @@ app.use('/api/admin', require('./router/adminLia'));
 app.use('/api/admin', require('./router/supportTickets').adminRouter);
 app.use('/api/support', require('./router/supportTickets').publicRouter);
 app.use('/api/plans', require('./router/plans').publicRouter);
+app.use('/api/comprar', require('./router/comprar'));
 app.use('/api/configuracion-pagos', require('./router/configuracionPagos'));
 
 const { iniciarReglaVolverAContactar } = require('./helpers/prospectosScheduler');
