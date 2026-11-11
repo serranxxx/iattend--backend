@@ -18,7 +18,8 @@ const STORAGE_PACKAGE = { base_mb: 10, extra_mb: 30, cost: 100 };
 // Pops: mismo precio por MB que la invitación (100 créditos / 20 MB = 5) y
 // niveles 5 → 15 → 30 MB. Se cobra la diferencia con el límite actual
 // (migración 2026-11-01_storage_pops.sql).
-const POP_STORAGE = { base_mb: 5, mb_cost: 5, levels: [15, 30] };
+// Pops: base 10 MB (2026-11-11c_pops_storage_10mb.sql); 20 y 30 MB a 5 créditos por MB de diferencia.
+const POP_STORAGE = { base_mb: 10, mb_cost: 5, levels: [20, 30] };
 
 // GET /api/storage/package — qué se ofrece.
 router.get('/package', (_req, res) => res.json({ success: true, package: STORAGE_PACKAGE, pop: POP_STORAGE }));
