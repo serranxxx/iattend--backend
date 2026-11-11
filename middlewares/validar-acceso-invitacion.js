@@ -1,18 +1,21 @@
 const { response } = require('express');
 const supabase = require('../config/supabase');
+const { tieneFuncionesDePlanner } = require('../helpers/roles');
 
 // Deja pasar solo a quien puede gestionar la invitación: el dueño, el planner
 // asignado (con el rol vigente y activo) o Administration. Es la misma regla
 // que can_manage_invitation() en la base (migrations/2026-09-24_planner_role.sql);
 // aquí se repite porque el backend usa la service role y auth.uid() no existe.
 //
-// El id sale de req.params.invitationId o de req.body.invitation_id. Sin esto,
-// cualquiera con el UUID (va en la página pública de la invitación) podía usar
-// a Lia como si fuera el organizador.
-const validarAccesoInvitacion = async (req, res = response, next) => {
+// Por omisión el id sale de req.params.invitationId o de req.body.invitation_id
+// (Lia, Save the Date, storage…). Sin esto, cualquiera con el UUID (va en la
+// página pública de la invitación) podía usar a Lia como si fuera el
+// organizador. Las rutas que traen el id en otro campo (router/invitation.js
+// usa `id`) arman su versión con validarAccesoInvitacionPor(req => …).
+const validarAccesoInvitacionPor = (leerId) => async (req, res = response, next) => {
     const authHeader = req.header('Authorization');
     const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-    const invitationId = req.params?.invitationId || req.body?.invitation_id;
+    const invitationId = leerId(req);
 
     if (!token) {
         return res.status(401).json({ success: false, error: 'No hay token de sesión en la petición' });
@@ -43,7 +46,7 @@ const validarAccesoInvitacion = async (req, res = response, next) => {
     const activo = profile?.active ?? true;
     const puede = invitation.user_id === userId
         || (activo && profile?.role === 'Administration')
-        || (activo && profile?.role === 'planner' && invitation.planner_id === userId); // Administración ya pasa arriba
+        || (activo && tieneFuncionesDePlanner(profile?.role) && invitation.planner_id === userId);
 
     if (!puede) {
         return res.status(403).json({ success: false, error: 'No tienes acceso a esta invitación' });
@@ -54,4 +57,8 @@ const validarAccesoInvitacion = async (req, res = response, next) => {
     next();
 };
 
-module.exports = { validarAccesoInvitacion };
+const validarAccesoInvitacion = validarAccesoInvitacionPor(
+    (req) => req.params?.invitationId || req.body?.invitation_id,
+);
+
+module.exports = { validarAccesoInvitacion, validarAccesoInvitacionPor };

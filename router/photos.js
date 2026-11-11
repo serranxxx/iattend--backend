@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const { randomUUID } = require('crypto');
 const supabase = require('../config/supabase');
+const { usuarioDeSesion, perfilDe, puedeGestionar, duenosDeEvento } = require('../helpers/accesoEvento');
 
 const router = express.Router();
 
@@ -189,10 +190,15 @@ router.post('/:photo_id/like', async (req, res) => {
 });
 
 // DELETE /api/photos/:photo_id
+// Solo quien gestiona el evento de la foto (dueño, planner asignado o
+// Administration), con la sesión de Supabase. Antes, sin `user_id` en el body
+// no validaba nada y, con él, confiaba en lo que mandara el cliente.
 router.delete('/:photo_id', async (req, res) => {
     try {
         const { photo_id } = req.params;
-        const { user_id } = req.body;
+
+        const usuario = await usuarioDeSesion(req);
+        if (!usuario) return res.status(401).json({ error: 'Inicia sesión' });
 
         // Obtener la foto con su event_id
         const { data: photo, error: fetchError } = await supabase
@@ -206,19 +212,13 @@ router.delete('/:photo_id', async (req, res) => {
             return res.status(404).json({ error: 'Foto no encontrada' });
         }
 
-        // Validar que el event_id pertenece al usuario autenticado
-        if (user_id) {
-            const { data: invitation, error: invError } = await supabase
-                .from('invitations')
-                .select('id')
-                .eq('id', photo.event_id)
-                .eq('user_id', user_id)
-                .maybeSingle();
-
-            if (invError) throw invError;
-            if (!invitation) {
-                return res.status(403).json({ error: 'No tienes permiso para eliminar esta foto' });
-            }
+        // El evento puede ser una invitación o un side event / Pop.
+        const [evento, perfil] = await Promise.all([
+            duenosDeEvento(photo.event_id),
+            perfilDe(usuario.id),
+        ]);
+        if (!evento || !puedeGestionar(perfil, usuario.id, evento)) {
+            return res.status(403).json({ error: 'No tienes permiso para eliminar esta foto' });
         }
 
         // Eliminar archivo de Storage
