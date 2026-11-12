@@ -81,6 +81,62 @@ router.post('/pop-upgrade', validarOrganizadorPop, async (req, res) => {
     }
 });
 
+// ── Material de un Pop en línea (bucket privado pop-material) ─────────
+// El editor pide permiso para subir (dueño + tipo + tamaño + espacio del
+// Pop) y sube directo con el token firmado; el backend nunca recibe el
+// archivo. Borrar: solo dentro de flash-<id>/material/.
+const MATERIAL_MIME = new Set([
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.ms-powerpoint',
+    'image/png', 'image/jpeg', 'image/webp',
+]);
+const MATERIAL_MAX = 20 * 1024 * 1024;
+const carpetaMaterial = (id) => `flash-${id}/material/`;
+
+// POST /api/storage/pop-material/subida — { side_event_id, nombre, mime, size }
+router.post('/pop-material/subida', validarOrganizadorPop, async (req, res) => {
+    const mime = String(req.body?.mime ?? '');
+    const size = Number(req.body?.size) || 0;
+    if (!MATERIAL_MIME.has(mime)) return res.status(415).json({ success: false, code: 'TIPO', message: 'Sube un PDF, PPTX o una imagen' });
+    if (size <= 0 || size > MATERIAL_MAX) return res.status(413).json({ success: false, code: 'TAMANO', message: 'El archivo pasa de 20 MB' });
+    try {
+        const { data: usado, error } = await supabase.rpc('pop_storage_usage', { p_side_event_id: req.pop.id });
+        if (error) throw error;
+        const limite = (req.pop.storage_limit_mb ?? POP_STORAGE.base_mb) * 1024 * 1024;
+        if (Number(usado || 0) + size > limite) {
+            return res.status(409).json({ success: false, code: 'SIN_ESPACIO', message: 'No queda espacio en este Pop' });
+        }
+        const nombre = String(req.body?.nombre ?? 'archivo');
+        const ext = (nombre.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin';
+        const base = nombre.replace(/\.[^.]+$/, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'archivo';
+        const path = `${carpetaMaterial(req.pop.id)}${Date.now()}-${base}.${ext}`;
+        const { data, error: errFirma } = await supabase.storage.from('pop-material').createSignedUploadUrl(path);
+        if (errFirma) throw errFirma;
+        return res.json({ success: true, path, token: data.token });
+    } catch (err) {
+        console.error('[storage/pop-material/subida]', err?.message);
+        return res.status(500).json({ success: false, message: 'No se pudo preparar la subida' });
+    }
+});
+
+// POST /api/storage/pop-material/borrar — { side_event_id, path }
+router.post('/pop-material/borrar', validarOrganizadorPop, async (req, res) => {
+    const path = String(req.body?.path ?? '');
+    if (!path.startsWith(carpetaMaterial(req.pop.id)) || path.includes('..')) {
+        return res.status(400).json({ success: false, message: 'Archivo no válido' });
+    }
+    try {
+        const { error } = await supabase.storage.from('pop-material').remove([path]);
+        if (error) throw error;
+        return res.json({ success: true });
+    } catch (err) {
+        console.error('[storage/pop-material/borrar]', err?.message);
+        return res.status(500).json({ success: false, message: 'No se pudo borrar el archivo' });
+    }
+});
+
 // POST /api/storage/upgrade — { invitation_id }: 10 → 30 MB por 100 créditos.
 router.post('/upgrade', validarAccesoInvitacion, async (req, res) => {
     const { invitation_id } = req.body;

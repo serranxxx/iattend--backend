@@ -85,6 +85,9 @@ app.post(
 );
 
 
+// Importar invitados manda la lista ya revisada (hasta 3,000 filas): más que
+// los 100 KB por omisión. Va antes del parser global para ganarle.
+app.use('/api/guests/import', express.json({ limit: '5mb' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -111,6 +114,8 @@ app.use('/api/side-events', require('./router/sideEventChat'));
 app.use('/api/side-events', require('./router/sideEventForm'));
 // El invitado con su código: entrar, confirmar / rechazar (con acompañantes) y avatar.
 app.use('/api/side-events', require('./router/sideEventInvitado'));
+// Pop en línea: enlace, códigos y material (solo confirmados si así lo pide el Pop).
+app.use('/api/side-events', require('./router/sideEventAcceso'));
 // Lector de pases de un Pop (vite /scanner?pop=, sin sesión, con su clave).
 app.use('/api/lector', require('./router/lectorPop'));
 // Confirmación en una invitación pública (candado abierto, invitations.type = 'open').
