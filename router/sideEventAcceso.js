@@ -8,8 +8,10 @@ const router = express.Router();
 
 /*
   Pop en línea (handoff "Pop · Evento en línea"): el enlace (Zoom / Meet /
-  YouTube), sus códigos y el material viven en side_events.acceso, una
-  columna que la página pública no recibe (migrations/2026-11-12b_pops_en_linea.sql).
+  YouTube), sus códigos y el material viven en la tabla side_event_acceso
+  (migrations/2026-11-12c_acceso_en_tabla.sql). No en side_events: la RPC
+  pública side_event_publico devuelve la fila completa (menos datos del
+  dueño), así que una columna ahí se filtraba antes de confirmar.
   Aquí se entregan:
   · si el Pop no es "solo para confirmados", a cualquiera con su clave;
   · si lo es, al invitado confirmado (header x-codigo-invitado = su código)
@@ -34,6 +36,16 @@ const esOrganizador = async (req, evento) => {
     const { data: perfil } = await supabase.from('profiles').select('role, active').eq('user_id', uid).maybeSingle();
     const activo = perfil?.active ?? true;
     return (activo && perfil?.role === 'Administration') || (activo && tieneFuncionesDePlanner(perfil?.role) && evento.planner_id === uid);
+};
+
+// El acceso del Pop: la tabla y, mientras no exista, la columna de antes.
+const accesoDe = async (id) => {
+    const { data, error } = await supabase.from('side_event_acceso').select('data').eq('side_event_id', id).maybeSingle();
+    if (!error) return data?.data ?? null;
+    if (!['42P01', 'PGRST205', 'PGRST106'].includes(error.code)) throw error;
+    const { data: fila, error: e2 } = await supabase.from('side_events').select('acceso').eq('id', id).maybeSingle();
+    if (e2) return null;
+    return fila?.acceso ?? null;
 };
 
 const confirmado = async (req, evento) => {
@@ -65,16 +77,17 @@ const paraInvitado = async (acceso) => {
 router.get('/:id/acceso', async (req, res) => {
     if (!limite(`a:${ipDe(req)}`)) return res.status(429).json({ ok: false, msg: 'Demasiados intentos. Inténtalo en unos minutos.' });
     try {
-        const evento = await buscarSideEventPorClave(req.params.id, 'id, body, acceso, user_id, planner_id');
+        const evento = await buscarSideEventPorClave(req.params.id, 'id, body, user_id, planner_id');
         if (!evento) return res.status(404).json({ ok: false, msg: 'Evento no encontrado' });
-        if (evento.body?.modo !== 'online' || !evento.acceso) return res.status(404).json({ ok: false, msg: 'Este evento no es en línea' });
+        const acceso = evento.body?.modo === 'online' ? await accesoDe(evento.id) : null;
+        if (!acceso) return res.status(404).json({ ok: false, msg: 'Este evento no es en línea' });
 
-        const abierto = evento.acceso.onlyConfirmed === false;
+        const abierto = acceso.onlyConfirmed === false;
         const puede = abierto || await confirmado(req, evento) || await esOrganizador(req, evento);
         if (!puede) return res.status(403).json({ ok: false, bloqueado: true, msg: 'Confirma tu asistencia para verlo' });
 
         res.set('Cache-Control', 'private, no-store');
-        return res.json({ ok: true, acceso: await paraInvitado(evento.acceso) });
+        return res.json({ ok: true, acceso: await paraInvitado(acceso) });
     } catch (err) {
         console.error('Error en GET /api/side-events/:id/acceso:', err);
         return res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
