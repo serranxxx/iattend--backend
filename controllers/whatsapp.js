@@ -345,8 +345,11 @@ const sendWhatsappFreeTextMessage = async (to, text) => {
 const sendWhatsappFreeText = async (req, res) => {
   try {
      const { to, text, invitation_id } = req.body;
+    // Un Pop no tiene invitación: la respuesta queda ligada a su side event
+    // (migración 2026-11-12d_whatsapp_freetext_pop.sql).
+    const sideEventId = invitation_id ? null : (req.body.sideEventId ?? null);
 
-    if (!to || !text || !invitation_id)  {
+    if (!to || !text || (!invitation_id && !sideEventId))  {
       return res.status(400).json({
         ok: false,
         msg: 'Missing required fields: to, text',
@@ -364,7 +367,8 @@ const sendWhatsappFreeText = async (req, res) => {
         to_phone: normalizedPhone,
         message_body: text,
         status: 'processing',
-        invitation_id: invitation_id,  
+        invitation_id: invitation_id || null,
+        ...(sideEventId && { side_event_id: sideEventId }),
         raw_send_response: data,
       })
       .select()

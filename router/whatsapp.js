@@ -3,6 +3,7 @@ const { sendWhatsappTemplate, sendWhatsappReminder, createWhatsappBulk, sendWhat
 const { getWhatsappMediaUrl } = require('../controllers/whatsappWebhook');
 const { crearLoteRecordatorio } = require('../controllers/reminderTemplates');
 const { validarAccesoEvento } = require('../middlewares/validar-acceso-evento');
+const { conversacionesDePop, marcarLeidosPop } = require('../controllers/conversacionesPop');
 
 const router = Router();
 
@@ -14,6 +15,9 @@ router.post('/reminders', validarAccesoEvento, sendWhatsappReminder);
 router.post('/reminders/bulk', validarAccesoEvento, crearLoteRecordatorio);
 router.post('/bulk', validarAccesoEvento, createWhatsappBulk);
 router.post('/freetext', validarAccesoEvento, sendWhatsappFreeText);
+// Buzón de un Pop (la boda usa la RPC get_conversations_by_invitation).
+router.post('/conversaciones', validarAccesoEvento, conversacionesDePop);
+router.post('/conversaciones/leidos', validarAccesoEvento, marcarLeidosPop);
 // Sin sesión a propósito: lo piden <img> / <video> / <audio> del buzón, que no
 // pueden mandar headers. El mediaId de Meta es largo y no secuencial.
 router.get('/media/:mediaId', getWhatsappMediaUrl);

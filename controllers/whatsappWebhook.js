@@ -222,7 +222,29 @@ const handleInstagramProspect = async (igUsername, igUrl, fromPhoneRaw, vendedor
 
 // ── Dispatch matching ─────────────────────────────────────────────────────
 
+// Si la persona recibió invitación de una boda y de un Pop, su respuesta va
+// al envío más reciente de los dos (antes siempre ganaba la boda, porque se
+// buscaba solo en guests).
 const findMatchingDispatch = async (fromPhone, messageTimestamp) => {
+  const boda = await findWeddingDispatch(fromPhone, messageTimestamp);
+  const { data: pop } = await supabase
+    .from("invitation_message_dispatches")
+    .select("id, created_at")
+    .eq("guest_phone", normalizePhone(fromPhone))
+    .not("side_event_id", "is", null)
+    .is("invitation_id", null)
+    .lte("created_at", messageTimestamp)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!pop) return boda;
+  if (!boda || boda === pop.id) return pop.id;
+  const { data: otro } = await supabase
+    .from("invitation_message_dispatches").select("created_at").eq("id", boda).maybeSingle();
+  return new Date(pop.created_at) > new Date(otro?.created_at ?? 0) ? pop.id : boda;
+};
+
+const findWeddingDispatch = async (fromPhone, messageTimestamp) => {
   const normalizedPhone = normalizePhone(fromPhone);
   const phoneWithPlus = normalizedPhone.startsWith('+')
     ? normalizedPhone

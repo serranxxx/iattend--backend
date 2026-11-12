@@ -126,13 +126,13 @@ router.post('/:id/confirmacion-publica', async (req, res) => {
     if (acompanantes.length > MAX_ACOMPANANTES) {
         return res.status(400).json({ ok: false, msg: `Máximo ${MAX_ACOMPANANTES} acompañantes` });
     }
-    // Quien no va, no lleva acompañantes.
-    const conAcompanantes = estado === 'confirmado' ? acompanantes : [];
-
     try {
-        const evento = await buscarSideEventPorClave(req.params.id, 'id, type');
+        const evento = await buscarSideEventPorClave(req.params.id, 'id, type, body');
         if (!evento) return res.status(404).json({ ok: false, msg: 'Evento no encontrado' });
         if (evento.type !== 'open') return res.status(403).json({ ok: false, msg: 'Este evento es privado' });
+        // Quien no va, no lleva acompañantes; tampoco si el organizador los
+        // apagó (body.allowCompanions = false, "Permitir acompañantes").
+        const conAcompanantes = estado === 'confirmado' && evento.body?.allowCompanions !== false ? acompanantes : [];
 
         const filaBase = {
             side_events_id: evento.id,
