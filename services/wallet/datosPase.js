@@ -270,7 +270,11 @@ async function datosPaseInvitacion(invitationId, guestId) {
         eventDate: fechaValor,
         eventTime: momentos[0]?.time ?? '',
         tableNumber,
-        coverImageUrl: toCoverImageUrl(d.wallet?.image) || toCoverImageUrl(d.cover?.image?.prod),
+        // Invitación en PDF (data.formato === 'pdf'): sin foto propia del pase,
+        // la primera página del PDF (no la portada del diseño de I attend).
+        coverImageUrl: toCoverImageUrl(d.wallet?.image)
+            || (d.formato === 'pdf' ? d.pdf?.pages?.[0]?.url || null : null)
+            || toCoverImageUrl(d.cover?.image?.prod),
         primaryColor: d.generals?.colors?.primary ?? '#FFFFFF',
         accentColor: d.generals?.colors?.accent ?? '#FFFFFF',
         // Diseño nuevo: su mesa a la derecha (si ya tiene) y él abajo.

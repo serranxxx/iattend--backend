@@ -14,7 +14,7 @@ router.post('/normalize', validarAccesoEvento, normalizeGuests);
 router.post('/map', validarAccesoEvento, mapColumns);
 router.post('/existentes', validarAccesoEvento, existingGuests);
 router.post('/confirm', validarAccesoEvento, confirmImport);
-// Importar a un Pop desde otro evento del organizador: la lista de sus
+// Importar a un Pop o a una boda desde otro evento del organizador: la lista de sus
 // eventos y los invitados de uno (controllers/importarDeEvento.js).
 router.post('/eventos', validarAccesoEvento, listarEventos);
 router.post('/desde-evento', validarAccesoEvento, invitadosDeEvento);

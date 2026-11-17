@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 
-// Importar invitados a un Pop desde otro evento del mismo organizador.
+// Importar invitados a un Pop (o a una boda) desde otro evento del mismo
+// organizador.
 // Va detrás de validarAccesoEvento (sesión + acceso al evento destino, que
 // deja req.userId). Aquí se revisa que el evento ORIGEN también sea suyo:
 // dueño o planner asignado. Ni Administración ve los eventos de otros desde
@@ -21,6 +22,8 @@ const contar = (filas, campo) => {
 async function listarEventos(req, res) {
     const uid = req.userId;
     const destino = String(req.body.side_events_id ?? req.body.sideEventId ?? '');
+    // Destino = la invitación misma (no uno de sus side events): no se ofrece.
+    const destinoInv = destino ? '' : String(req.body.invitation_id ?? req.body.invitationId ?? '');
     try {
         const { data: invitaciones, error: e1 } = await supabase
             .from('invitations')
@@ -52,7 +55,7 @@ async function listarEventos(req, res) {
         const nombreInv = new Map((invitaciones ?? []).map((i) => [i.id, i.name]));
 
         const eventos = [
-            ...(invitaciones ?? []).map((i) => ({
+            ...(invitaciones ?? []).filter((i) => String(i.id) !== destinoInv).map((i) => ({
                 tipo: 'invitacion',
                 id: i.id,
                 nombre: i.name || '',
