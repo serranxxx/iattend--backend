@@ -430,8 +430,8 @@ const asignarClientePop = async (req, res = response) => {
             return res.status(updateError ? 500 : 409).json({ ok: false, msg: updateError?.message || 'Este evento ya se le envió a un cliente' });
         }
 
-        if (cuenta.cuentaNueva) await enviarBienvenida(cliente.correo, cuenta.password);
-        else await avisarEventoAsignado({ correo: cliente.correo, plannerId: req.plannerId, nombreEvento: pop.name });
+        if (cuenta.cuentaNueva) await enviarBienvenida(cliente.correo, cuenta.password, { espacio: 'pops' });
+        else await avisarEventoAsignado({ correo: cliente.correo, plannerId: req.plannerId, nombreEvento: pop.name, espacio: 'pops' });
         return res.json({ ok: true, cliente_existente: !cuenta.cuentaNueva });
     } catch (error) {
         return res.status(500).json({ ok: false, msg: error.message });

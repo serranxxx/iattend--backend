@@ -110,7 +110,7 @@ async function crearPopEvent(datos, { plannerId, plannerEmail, sinPlanner = fals
         throw new Error(error?.message || 'No se pudo crear el Pop');
     }
 
-    if (cliente?.cuentaNueva) await enviarBienvenida(correo, cliente.password);
+    if (cliente?.cuentaNueva) await enviarBienvenida(correo, cliente.password, { espacio: 'pops' });
 
     return {
         sideEventId: pop.id,

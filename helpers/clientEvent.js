@@ -249,11 +249,15 @@ async function resolverCliente({ correo, nombre, ownerNames = [] }) {
     };
 }
 
+// Link de entrada de los correos. Con `espacio: 'pops'` (cuenta de un Pop) el
+// login lleva a /invitations?espacio=pops: entra directo a la UI de Pops.
+const urlDeLogin = (espacio) => `https://www.iattend.site/login${espacio === 'pops' ? '?espacio=pops' : ''}`;
+
 /** Correo de bienvenida con usuario y contraseña. Best-effort: nunca lanza. */
-async function enviarBienvenida(correo, password) {
+async function enviarBienvenida(correo, password, { espacio } = {}) {
     try {
         await sendMail(correo, 'Tu cuenta de I attend está lista 🎉', vendorWelcomeEmailTemplate({
-            email: correo, password, loginUrl: 'https://www.iattend.site/login',
+            email: correo, password, loginUrl: urlDeLogin(espacio),
         }));
     } catch (mailError) {
         console.error('Error enviando correo de bienvenida:', mailError.message);
@@ -264,13 +268,13 @@ async function enviarBienvenida(correo, password) {
  * Aviso a un cliente que ya tenía cuenta: su planner le asignó un evento.
  * No interrumpe el envío si el correo falla (el evento ya quedó asignado).
  */
-async function avisarEventoAsignado({ correo, plannerId, nombreEvento }) {
+async function avisarEventoAsignado({ correo, plannerId, nombreEvento, espacio }) {
     try {
         const { data: planner } = await supabase
             .from('profiles').select('full_name').eq('user_id', plannerId).maybeSingle();
         await sendMail(correo, 'Tienes un evento nuevo en I attend', eventSharedEmailTemplate({
             nombreEvento, nombrePlanner: planner?.full_name ?? null, email: correo,
-            loginUrl: 'https://www.iattend.site/login',
+            loginUrl: urlDeLogin(espacio),
         }));
     } catch (mailError) {
         console.error('Error enviando aviso de evento asignado:', mailError.message);
