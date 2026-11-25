@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { normalizeGuests, mapColumns, existingGuests, confirmImport } = require('../controllers/guestImport');
 const { listarEventos, invitadosDeEvento } = require('../controllers/importarDeEvento');
 const { validarAccesoEvento } = require('../middlewares/validar-acceso-evento');
+const { soloPopPlus } = require('../middlewares/solo-pop-plus');
 
 const router = Router();
 
@@ -10,13 +11,15 @@ const router = Router();
 // así que la RLS no lo frena).
 // /normalize = el camino viejo (toda la lista a la IA); queda mientras haya
 // pestañas con el front anterior. El front nuevo usa /map + /existentes.
-router.post('/normalize', validarAccesoEvento, normalizeGuests);
-router.post('/map', validarAccesoEvento, mapColumns);
+router.post('/normalize', validarAccesoEvento, soloPopPlus, normalizeGuests);
+router.post('/map', validarAccesoEvento, soloPopPlus, mapColumns);
 router.post('/existentes', validarAccesoEvento, existingGuests);
-router.post('/confirm', validarAccesoEvento, confirmImport);
+router.post('/confirm', validarAccesoEvento, soloPopPlus, confirmImport);
 // Importar a un Pop o a una boda desde otro evento del organizador: la lista de sus
 // eventos y los invitados de uno (controllers/importarDeEvento.js).
+// Importar (Excel con Lia o de otro evento) es de Pops Plus en un Pop:
+// soloPopPlus. /existentes y /eventos solo leen.
 router.post('/eventos', validarAccesoEvento, listarEventos);
-router.post('/desde-evento', validarAccesoEvento, invitadosDeEvento);
+router.post('/desde-evento', validarAccesoEvento, soloPopPlus, invitadosDeEvento);
 
 module.exports = router;

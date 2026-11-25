@@ -75,6 +75,18 @@ app.post(
             return res.status(400).send(`Webhook Error: ${err.message}`);
         }
 
+        // Suscripción de Pops+ (helpers/popsSuscripcion.js): checkout en modo
+        // suscripción, cambios de la suscripción y renovaciones. En Stripe el
+        // endpoint debe escuchar también customer.subscription.* e invoice.*.
+        try {
+            if (await require('./helpers/popsSuscripcion').eventoDeSuscripcion(event)) {
+                return res.json({ received: true });
+            }
+        } catch (err) {
+            console.error('[pops+] Error en el webhook:', err.message);
+            return res.status(500).json({ received: false });
+        }
+
         if (event.type === "checkout.session.completed") {
             const session = event.data.object;
             await processingPayment(session)
@@ -88,6 +100,8 @@ app.post(
 // Importar invitados manda la lista ya revisada (hasta 3,000 filas): más que
 // los 100 KB por omisión. Va antes del parser global para ganarle.
 app.use('/api/guests/import', express.json({ limit: '5mb' }));
+// El body de un Pop (elementos, trazos de Dibujar…) pasa de 100 KB.
+app.use('/api/side-events', express.json({ limit: '5mb' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -116,6 +130,11 @@ app.use('/api/side-events', require('./router/sideEventForm'));
 app.use('/api/side-events', require('./router/sideEventInvitado'));
 // Pop en línea: enlace, códigos y material (solo confirmados si así lo pide el Pop).
 app.use('/api/side-events', require('./router/sideEventAcceso'));
+// Guardar desde el editor (name, url_image, body), con la sesión del organizador.
+app.use('/api/side-events', require('./router/sideEventGuardar'));
+// Pops › Mis Pops: archivar / desarchivar y borrar un Pop (dueño, planner o admin).
+app.use('/api/side-events', require('./router/sideEventArchivo'));
+app.use('/api/pops/suscripcion', require('./router/popsSuscripcion'));
 // Lector de pases de un Pop (vite /scanner?pop=, sin sesión, con su clave).
 app.use('/api/lector', require('./router/lectorPop'));
 // Confirmación en una invitación pública (candado abierto, invitations.type = 'open').

@@ -9,6 +9,7 @@
 */
 
 const express = require('express');
+const { popEsPlus } = require('../helpers/popPlus');
 const router = express.Router();
 const supabase = require('../config/supabase');
 const { validarAccesoInvitacion } = require('../middlewares/validar-acceso-invitacion');
@@ -96,6 +97,10 @@ const carpetaMaterial = (id) => `flash-${id}/material/`;
 
 // POST /api/storage/pop-material/subida — { side_event_id, nombre, mime, size }
 router.post('/pop-material/subida', validarOrganizadorPop, async (req, res) => {
+    // Subir documentos al material de un Pop en línea es de Pops Plus.
+    if (!(await popEsPlus(req.pop.id).catch(() => true))) {
+        return res.status(402).json({ success: false, code: 'POPS_PLUS', message: 'Subir documentos es de Pops Plus' });
+    }
     const mime = String(req.body?.mime ?? '');
     const size = Number(req.body?.size) || 0;
     if (!MATERIAL_MIME.has(mime)) return res.status(415).json({ success: false, code: 'TIPO', message: 'Sube un PDF, PPTX o una imagen' });

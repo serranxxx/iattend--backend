@@ -4,6 +4,7 @@ const { planEntitlements } = require('../config/plans');
 const { sendMail } = require('../controllers/mailer');
 const { vendorWelcomeEmailTemplate } = require('../controllers/templates/vendorWelcomeEmail');
 const { eventSharedEmailTemplate } = require('../controllers/templates/eventSharedEmail');
+const { popAccesoEmailTemplate, popAccesoEmailTexto, ASUNTO_POP_LISTO } = require('../controllers/templates/popAccesoEmail');
 const { isValidPhone } = require('./validatePhone');
 
 // Alta de un evento para un cliente: misma lógica que /sales (crearVenta en
@@ -255,6 +256,8 @@ const urlDeLogin = (espacio) => `https://www.iattend.site/login${espacio === 'po
 
 /** Correo de bienvenida con usuario y contraseña. Best-effort: nunca lanza. */
 async function enviarBienvenida(correo, password, { espacio } = {}) {
+    // Pops: el correo azul de acceso; Weddings, el morado de siempre.
+    if (espacio === 'pops') return enviarAccesoPop({ correo, password });
     try {
         await sendMail(correo, 'Tu cuenta de I attend está lista 🎉', vendorWelcomeEmailTemplate({
             email: correo, password, loginUrl: urlDeLogin(espacio),
@@ -265,10 +268,30 @@ async function enviarBienvenida(correo, password, { espacio } = {}) {
 }
 
 /**
+ * Correo de acceso de un Pop ("Tu Pop ya está listo 🎉", diseño azul,
+ * controllers/templates/popAccesoEmail.js): con contraseña si la cuenta es
+ * nueva; sin ella, solo el correo y "Entrar a mi panel". `replyTo`: el
+ * planner que lo mandó (opcional). Best-effort: nunca lanza.
+ */
+async function enviarAccesoPop({ correo, password = null, replyTo }) {
+    try {
+        await sendMail(correo, ASUNTO_POP_LISTO, popAccesoEmailTemplate({ correo, password }), {
+            fromName: 'Pops by I attend',
+            text: popAccesoEmailTexto({ correo, password }),
+            ...(replyTo ? { replyTo } : {}),
+        });
+    } catch (mailError) {
+        console.error('Error enviando el correo de acceso del Pop:', mailError.message);
+    }
+}
+
+/**
  * Aviso a un cliente que ya tenía cuenta: su planner le asignó un evento.
  * No interrumpe el envío si el correo falla (el evento ya quedó asignado).
  */
 async function avisarEventoAsignado({ correo, plannerId, nombreEvento, espacio }) {
+    // Un Pop agregado a una cuenta que ya existía: el correo azul sin contraseña.
+    if (espacio === 'pops') return enviarAccesoPop({ correo });
     try {
         const { data: planner } = await supabase
             .from('profiles').select('full_name').eq('user_id', plannerId).maybeSingle();
@@ -348,5 +371,6 @@ module.exports = {
     urlOcupada,
     resolverCliente,
     enviarBienvenida,
+    enviarAccesoPop,
     crearEventoDeCliente,
 };

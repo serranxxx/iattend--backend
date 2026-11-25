@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { sendWhatsappTemplate, sendWhatsappReminder, createWhatsappBulk, sendWhatsappFreeText } = require('../controllers/whatsapp');
 const { getWhatsappMediaUrl } = require('../controllers/whatsappWebhook');
 const { crearLoteRecordatorio } = require('../controllers/reminderTemplates');
+const { soloPopPlus } = require('../middlewares/solo-pop-plus');
 const { validarAccesoEvento } = require('../middlewares/validar-acceso-evento');
 const { conversacionesDePop, marcarLeidosPop } = require('../controllers/conversacionesPop');
 
@@ -12,7 +13,8 @@ const router = Router();
 router.post('/', validarAccesoEvento, sendWhatsappTemplate);
 router.post('/reminders', validarAccesoEvento, sendWhatsappReminder);
 // Recordatorios del banco (Guest management → Recordatorios), envío masivo.
-router.post('/reminders/bulk', validarAccesoEvento, crearLoteRecordatorio);
+// Recordatorios de un Pop: solo Pops+ (soloPopPlus; una boda pasa).
+router.post('/reminders/bulk', validarAccesoEvento, soloPopPlus, crearLoteRecordatorio);
 router.post('/bulk', validarAccesoEvento, createWhatsappBulk);
 router.post('/freetext', validarAccesoEvento, sendWhatsappFreeText);
 // Buzón de un Pop (la boda usa la RPC get_conversations_by_invitation).

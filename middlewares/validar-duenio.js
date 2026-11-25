@@ -21,4 +21,4 @@ const validarDuenio = async (req, res = response, next) => {
     next();
 };
 
-module.exports = { validarDuenio };
+module.exports = { validarDuenio, CORREO_DEL_DUENIO };

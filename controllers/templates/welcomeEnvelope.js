@@ -65,13 +65,24 @@ function welcomeEnvelopeEmail({ title, variant, height, headline, paragraph, ema
 <head>
 <meta charset="UTF-8">
 <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<!-- Solo claro: Apple Mail, Mail de iOS y Outlook no lo invierten en modo oscuro (Gmail lo ignora). -->
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light only">
 <title>${title}</title>
 <!--[if mso]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Figtree:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet">
 <style>
+  :root { color-scheme: light only; supported-color-schemes: light only; }
   a.wl-btn:hover { background-color:#1F4152 !important; }
+  /* Gmail en modo oscuro (iOS / Android) ignora color-scheme e invierte los
+     colores, pero no las imágenes ni los degradados. Estas dos capas regresan
+     el texto claro a su color sobre el sobre y el bolsillo (u + .body solo
+     existe en Gmail). El texto tinta sobre la carta blanca no se puede salvar:
+     Gmail invierte la carta completa y queda clara sobre oscuro. */
+  u + .body .gm-screen { background:#000; mix-blend-mode:screen; }
+  u + .body .gm-diff { background:#000; mix-blend-mode:difference; }
   /* Gmail y Apple Mail convierten el correo en un link azul subrayado. */
   .wl-email a, a.wl-email-link, a[x-apple-data-detectors] {
     color: #F1EBDE !important; text-decoration: none !important;
@@ -83,7 +94,7 @@ function welcomeEnvelopeEmail({ title, variant, height, headline, paragraph, ema
      desactivarían ese ajuste. Reacomodado quedaba apretado. */
 </style>
 </head>
-<body style="margin:0;padding:0;background-color:#121611;">
+<body class="body" style="margin:0;padding:0;background-color:#121611;">
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#121611" background="${ASSETS}/fondo-mail.jpg"
   style="background:#121611 url('${ASSETS}/fondo-mail.jpg') center top / cover no-repeat;">
@@ -142,8 +153,8 @@ function welcomeEnvelopeEmail({ title, variant, height, headline, paragraph, ema
                 <td width="127" valign="top" bgcolor="${PURPLE}" background="${PAPER}" style="width:127px;${paperBg}font-size:0;line-height:0;">
                   <img src="${img('b2-left.png')}" width="127" height="${ROW2_H}" alt="" style="display:block;width:127px;height:${ROW2_H}px;border:0;">
                 </td>
-                <td width="306" height="${ROW2_H - ROW2_PAD}" align="center" valign="top" bgcolor="#FFFFFF" background="${ASSETS}/letter-bottom.jpg"
-                  style="width:306px;height:${ROW2_H - ROW2_PAD}px;background:#FFFFFF url('${ASSETS}/letter-bottom.jpg') left top / 100% 100% no-repeat;padding-top:${ROW2_PAD}px;text-align:center;color:${INK};">
+                <td width="306" height="${ROW2_H - ROW2_PAD}" align="center" valign="top" bgcolor="#FFFFFF"
+                  style="width:306px;height:${ROW2_H - ROW2_PAD}px;background-color:#FFFFFF;padding-top:${ROW2_PAD}px;text-align:center;color:${INK};">
                   ${paragraph}
                 </td>
                 <td width="127" valign="top" bgcolor="${PURPLE}" background="${PAPER}" style="width:127px;${paperBg}font-size:0;line-height:0;">
@@ -163,11 +174,12 @@ function welcomeEnvelopeEmail({ title, variant, height, headline, paragraph, ema
               <v:fill type="frame" src="${img('pocket.jpg')}" color="${PURPLE}" />
               <v:textbox inset="0,${POCKET_PAD}px,0,0">
             <![endif]-->
-            <div style="font-family:${SANS};font-weight:500;font-size:17px;line-height:20px;color:${CREAM};">${password ? 'Tus datos de acceso:' : 'Entra con tu cuenta de siempre:'}</div>
+            <div class="gm-screen"><div class="gm-diff"><div style="font-family:${SANS};font-weight:500;font-size:17px;line-height:20px;color:${CREAM};">${password ? 'Tus datos de acceso:' : 'Entra con tu cuenta de siempre:'}</div></div></div>
 
             <table role="presentation" align="center" width="340" cellpadding="0" cellspacing="0" border="0" style="width:340px;margin:16px auto 0;">
               <tr>
                 <td style="border:2px dashed rgba(241,235,222,0.85);border-radius:18px;padding:18px 24px;text-align:center;">
+                  <div class="gm-screen"><div class="gm-diff">
                   <div style="font-family:${SANS};font-size:11px;line-height:14px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#E4DAEE;">Correo</div>
                   <!-- Link propio con estilo inline: si no, el cliente detecta el
                        correo y lo pinta azul y subrayado. -->
@@ -178,6 +190,7 @@ function welcomeEnvelopeEmail({ title, variant, height, headline, paragraph, ema
                   <div style="height:1px;line-height:1px;font-size:0;background-color:rgba(241,235,222,0.3);margin:14px 0;">&nbsp;</div>
                   <div style="font-family:${SANS};font-size:11px;line-height:14px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#E4DAEE;">Contraseña</div>
                   <div style="margin-top:4px;font-family:${MONO};font-size:22px;line-height:28px;font-weight:600;letter-spacing:2px;color:${CREAM};">${password}</div>` : ''}
+                  </div></div>
                 </td>
               </tr>
             </table>
@@ -196,8 +209,8 @@ function welcomeEnvelopeEmail({ title, variant, height, headline, paragraph, ema
                   <![endif]-->
                   <!--[if !mso]><!-->
                   <a class="wl-btn" href="${href}"
-                    style="display:block;background-color:${INK};border-radius:16px;color:${CREAM};font-family:${SERIF};font-size:21px;line-height:56px;height:56px;letter-spacing:1.2px;text-transform:uppercase;text-decoration:none;text-align:center;box-shadow:0 6px 14px rgba(10,20,28,0.4);">
-                    Entrar a mi panel&nbsp;&nbsp;<span style="font-family:${SANS};font-size:26px;">&rarr;</span>
+                    style="display:block;background-color:${INK};background-image:linear-gradient(${INK},${INK});border-radius:16px;color:${CREAM};font-family:${SERIF};font-size:21px;line-height:56px;height:56px;letter-spacing:1.2px;text-transform:uppercase;text-decoration:none;text-align:center;box-shadow:0 6px 14px rgba(10,20,28,0.4);">
+                    <span class="gm-screen" style="display:inline-block;"><span class="gm-diff" style="display:inline-block;">Entrar a mi panel&nbsp;&nbsp;<span style="font-family:${SANS};font-size:26px;">&rarr;</span></span></span>
                   </a>
                   <!--<![endif]-->
                 </td>
@@ -211,7 +224,7 @@ function welcomeEnvelopeEmail({ title, variant, height, headline, paragraph, ema
         <tr>
           <td align="center" style="padding:56px 0 0;">
             <img src="${ASSETS}/con-amor.png" width="230" alt="Con amor," style="display:block;width:230px;height:auto;border:0;">
-            <div style="margin-top:2px;font-family:${SERIF};font-size:19px;line-height:24px;letter-spacing:0.3px;color:${CREAM};">el equipo de I attend</div>
+            <div class="gm-screen" style="margin-top:2px;"><div class="gm-diff"><div style="font-family:${SERIF};font-size:19px;line-height:24px;letter-spacing:0.3px;color:${CREAM};">el equipo de I attend</div></div></div>
           </td>
         </tr>
 

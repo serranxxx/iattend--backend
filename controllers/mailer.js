@@ -12,13 +12,17 @@ const transporter = nodemailer.createTransport({
 });
 
 // Función utilitaria para enviar el correo
-async function sendMail(destinatario, asunto, mensajeHtml) {
+// `opciones.replyTo`: a quién le llegan las respuestas (p. ej. el planner que
+// mandó el Pop); `opciones.fromName`: el nombre que se ve como remitente;
+// `opciones.text`: la versión de texto plano (si no, se quita el HTML).
+async function sendMail(destinatario, asunto, mensajeHtml, opciones = {}) {
   const mailOptions = {
-    from: `"i attend" <${process.env.EMAIL_USER}>`,
+    from: `"${opciones.fromName || 'i attend'}" <${process.env.EMAIL_USER}>`,
     to: destinatario,
     subject: asunto,
     html: mensajeHtml,
-    text: typeof mensajeHtml === 'string' ? mensajeHtml.replace(/<[^>]*>/g, '') : ''
+    text: opciones.text ?? (typeof mensajeHtml === 'string' ? mensajeHtml.replace(/<[^>]*>/g, '') : ''),
+    ...(opciones.replyTo ? { replyTo: opciones.replyTo } : {}),
   };
 
   const info = await transporter.sendMail(mailOptions);

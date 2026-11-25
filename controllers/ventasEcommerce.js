@@ -9,8 +9,10 @@ const { conciliarComisionesStripe } = require('../helpers/comisionStripe');
 // ya quedaron procesados y solo se registra el error.
 // Ver migrations/2026-09-29_ventas_ecommerce.sql.
 
-// ventas.plan solo acepta estos (check constraint). Paperless no se registra.
-const PLAN_DE_VENTA = { pro: 'PRO', lite: 'Lite', flash: 'Flash' };
+// ventas.plan solo acepta estos (check constraint). Paperless se registra desde
+// migrations/2026-11-25_ventas_paperless.sql (antes se descartaba y no salía en
+// Admin › Ventas).
+const PLAN_DE_VENTA = { pro: 'PRO', lite: 'Lite', paperless: 'Paperless', flash: 'Flash' };
 
 let vendedorEcommerceId = null;
 

@@ -1,6 +1,6 @@
 const Stripe = require('stripe');
 const supabase = require('../config/supabase');
-const { validarCliente, resolverCliente, enviarBienvenida } = require('./clientEvent');
+const { validarCliente, resolverCliente, enviarAccesoPop } = require('./clientEvent');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -59,10 +59,13 @@ function validarPop(body = {}) {
  * nuevo del editor (SideEvents.jsx → insertSideEvent) y 30 créditos propios.
  * La hora va como string "wall-clock" (ver helpers/assets/eventDateTime.js
  * en iattend-vite): nunca se convierte de zona horaria.
- * `sinPlanner`: lo crea un cliente con un Pop gratis (planner_id vacío).
+ * `sinPlanner`: lo crea un cliente (planner_id vacío).
+ * `popsPlus`: si el Pop es Plus por sí mismo (side_events.pops_plus). Los que se
+ *   crean desde la app (ilimitados) nacen en false: su plan es el de la cuenta
+ *   dueña (pop_es_plus). Los comprados con Stripe siguen naciendo Plus.
  * @returns {{ sideEventId, clienteExistente, sinCliente, urlPublica }}
  */
-async function crearPopEvent(datos, { plannerId, plannerEmail, sinPlanner = false }) {
+async function crearPopEvent(datos, { plannerId, plannerEmail, sinPlanner = false, popsPlus = true }) {
     const { nombre, fecha, hora, destino, correo, nombreCliente } = datos;
 
     let dueno = { userId: null, correo: null };
@@ -83,6 +86,7 @@ async function crearPopEvent(datos, { plannerId, plannerEmail, sinPlanner = fals
             user_email: dueno.correo,
             credits: POP_CREDITS,
             credits_included: POP_CREDITS,
+            ...(popsPlus ? {} : { pops_plus: false }),
             date: new Date().toISOString(),
             name: nombre,
             url_image: null,
@@ -110,14 +114,20 @@ async function crearPopEvent(datos, { plannerId, plannerEmail, sinPlanner = fals
         throw new Error(error?.message || 'No se pudo crear el Pop');
     }
 
-    if (cliente?.cuentaNueva) await enviarBienvenida(correo, cliente.password, { espacio: 'pops' });
+    // El link del Pop: el código al azar, no el número (que se puede adivinar).
+    const urlPublica = `https://iattend.events/side-event/${pop.public_code || pop.id}`;
+
+    // Correo de acceso del Pop (diseño azul "Tu Pop ya está listo"): con su
+    // contraseña si la cuenta es nueva; si ya tenía cuenta, solo para entrar.
+    if (destino === 'ahora') {
+        await enviarAccesoPop({ correo, password: cliente?.cuentaNueva ? cliente.password : null, replyTo: plannerEmail || undefined });
+    }
 
     return {
         sideEventId: pop.id,
         clienteExistente: cliente ? !cliente.cuentaNueva : false,
         sinCliente: destino === 'despues',
-        // El código al azar, no el número (que se puede adivinar).
-        urlPublica: `https://iattend.events/side-event/${pop.public_code || pop.id}`,
+        urlPublica,
     };
 }
 

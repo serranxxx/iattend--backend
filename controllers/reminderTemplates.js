@@ -239,7 +239,12 @@ const armarPayload = (plantilla, telefono, bodyParams, buttonParam, headerImage)
 };
 
 // POST /api/whats/reminders/bulk
-// Body: { invitationId, templateId, items: [{ guestId, bodyParams: [...], buttonParam, headerImage }] }
+// Body: { invitationId | sideEventId, templateId, items: [{ guestId, bodyParams: [...], buttonParam, headerImage }] }
+//
+// Con sideEventId (Pop, solo Pops+: router/whatsapp.js → soloPopPlus) los
+// invitados son de side_events_guests, el lote y sus envíos quedan con
+// side_event_id (sin invitation_id) y el worker escribe los contadores en
+// side_events_guests y reembolsa en side_events.credits.
 //
 // Solo titulares (companion_id vacío) de esa invitación con número de México.
 // El teléfono y el nombre salen de la base, no del cliente. Se descartan los
@@ -248,10 +253,12 @@ const armarPayload = (plantilla, telefono, bodyParams, buttonParam, headerImage)
 // (accepted) y el worker reembolsa los fallidos al cerrar el lote.
 const crearLoteRecordatorio = async (req, res = response) => {
     try {
-        const { invitationId, templateId, items } = req.body || {};
+        const { templateId, items } = req.body || {};
+        const sideEventId = req.body?.sideEventId ? Number(req.body.sideEventId) : null;
+        const invitationId = sideEventId ? null : (req.body?.invitationId || null);
 
-        if (!invitationId || !templateId || !Array.isArray(items) || !items.length) {
-            return res.status(400).json({ ok: false, msg: 'Missing required fields: invitationId, templateId, items[]' });
+        if ((!invitationId && !sideEventId) || !templateId || !Array.isArray(items) || !items.length) {
+            return res.status(400).json({ ok: false, msg: 'Missing required fields: invitationId (or sideEventId), templateId, items[]' });
         }
         if (items.length > MAX_LOTE) {
             return res.status(400).json({ ok: false, msg: `Batch too large (max ${MAX_LOTE} items)` });
@@ -281,17 +288,23 @@ const crearLoteRecordatorio = async (req, res = response) => {
         }
 
         const ids = [...new Set(items.map(i => Number(i.guestId)))];
-        const { data: invitados, error: errorInvitados } = await supabase
-            .from('guests')
-            .select('id, name, phone_number, companion_id, invitation_id')
-            .eq('invitation_id', invitationId)
-            .in('id', ids);
+        const { data: invitados, error: errorInvitados } = sideEventId
+            ? await supabase
+                .from('side_events_guests')
+                .select('id, name, phone_number, companion_id')
+                .eq('side_events_id', sideEventId)
+                .in('id', ids)
+            : await supabase
+                .from('guests')
+                .select('id, name, phone_number, companion_id, invitation_id')
+                .eq('invitation_id', invitationId)
+                .in('id', ids);
 
         if (errorInvitados) return res.status(500).json({ ok: false, msg: errorInvitados.message });
 
         const validos = new Map(
             (invitados || [])
-                .filter(g => (g.companion_id === null || g.companion_id === undefined) && TELEFONO_MX.test(g.phone_number || ''))
+                .filter(g => (g.companion_id === null || g.companion_id === undefined || g.companion_id === '') && TELEFONO_MX.test(g.phone_number || ''))
                 .map(g => [Number(g.id), g])
         );
 
@@ -299,7 +312,7 @@ const crearLoteRecordatorio = async (req, res = response) => {
         const { data: recientes } = await supabase
             .from('invitation_reminder_dispatches')
             .select('guest_id')
-            .eq('invitation_id', invitationId)
+            .eq(sideEventId ? 'side_event_id' : 'invitation_id', sideEventId ?? invitationId)
             .eq('reminder_template_id', plantilla.id)
             .neq('status', 'failed')
             .gte('created_at', desde);
@@ -329,6 +342,7 @@ const crearLoteRecordatorio = async (req, res = response) => {
             .from('invitation_send_batches')
             .insert({
                 invitation_id: invitationId,
+                side_event_id: sideEventId,
                 kind: 'reminder',
                 reminder_template_id: plantilla.id,
                 total: aceptados.length,
@@ -342,7 +356,7 @@ const crearLoteRecordatorio = async (req, res = response) => {
 
         const { error: errorItems } = await supabase
             .from('invitation_send_batch_items')
-            .insert(aceptados.map(a => ({ ...a, batch_id: lote.id, invitation_id: invitationId, status: 'queued' })));
+            .insert(aceptados.map(a => ({ ...a, batch_id: lote.id, invitation_id: invitationId, side_event_id: sideEventId, status: 'queued' })));
 
         if (errorItems) {
             await supabase.from('invitation_send_batches')

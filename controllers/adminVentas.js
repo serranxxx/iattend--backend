@@ -5,7 +5,7 @@ const { conciliarComisionesStripe } = require('../helpers/comisionStripe');
 
 const TIPOS_VENDEDOR_VALIDOS = ['interno', 'externo'];
 // Pop: venta de un Pop (side_event_id, sin invitación).
-const PLANES_VALIDOS = ['PRO', 'Lite', 'Flash'];
+const PLANES_VALIDOS = ['PRO', 'Lite', 'Paperless', 'Flash'];
 // transferencia pide comprobante de cada abono; digital (Stripe) no.
 const METODOS_PAGO_VALIDOS = ['transferencia', 'digital'];
 const UNIQUE_VIOLATION = '23505';

@@ -17,7 +17,7 @@ function plannerWelcomeEmailTemplate({ nombre, genero = 'F', email, password, lo
     paragraph: `
       <div style="font-family:${SANS};font-style:italic;font-size:15px;line-height:22px;color:${INK};">Estamos muy emocionados de trabajar contigo.</div>`,
     note: `
-      <div style="max-width:360px;margin:20px auto 0;padding:0 16px;font-family:${SANS};font-style:italic;font-size:15px;line-height:22px;color:${CREAM};">Dentro encontrarás una invitación de prueba para que conozcas a detalle cómo funciona I attend.</div>`,
+      <div class="gm-screen" style="max-width:360px;margin:20px auto 0;"><div class="gm-diff"><div style="padding:0 16px;font-family:${SANS};font-style:italic;font-size:15px;line-height:22px;color:${CREAM};">Dentro encontrarás una invitación de prueba para que conozcas a detalle cómo funciona I attend.</div></div></div>`,
     email: escapeHtml(email),
     password: escapeHtml(password),
     loginUrl,

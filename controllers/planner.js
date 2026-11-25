@@ -207,6 +207,13 @@ async function finalizarEventoPlanner(session) {
             completed_at: new Date().toISOString(),
             error: null,
         }).eq('id', id);
+        // Pop pagado "para mí": el comprador también recibe el correo de acceso
+        // (diseño azul, sin contraseña: ya tiene cuenta). "A mi cliente" ya
+        // lo mandó crearPopEvent.
+        if (esPop && pendiente.payload?.destino === 'mio') {
+            const correoComprador = pendiente.payload?.plannerEmail || session.customer_details?.email;
+            if (correoComprador) await require('../helpers/clientEvent').enviarAccesoPop({ correo: correoComprador });
+        }
         // Los Pops pagados se registran como venta de Ecommerce (pago digital).
         if (esPop && monto > 0) {
             await registrarVentaEcommerce({ sideEventId: evento.sideEventId, planName: 'flash', session });
@@ -294,28 +301,43 @@ const precioEventoPop = async (req, res = response) => {
     }
 };
 
-// POST /api/planner/pop  — con uno de sus Pops gratis. También un cliente
+// POST /api/planner/pop — crea un Pop. Los Pops son ilimitados: ya no se gasta
+// un Pop gratis ni se paga (el plan Free limita Pops activos y personas, no
+// cuántos se crean; ver migración 2026-11-23c). También un cliente
 // (validarCuenta): el suyo siempre es para él y no lleva planner.
+// "A mi cliente" y "Enviar después" son de Pops+ (402 POPS_PLUS en Free).
+// Nace con pops_plus = false: su plan es el de la cuenta dueña.
 const crearPopGratis = async (req, res = response) => {
     const { error: invalido, datos } = validarPop(req.esPlanner === false ? { ...req.body, destino: 'mio' } : req.body);
     if (invalido) return res.status(400).json({ ok: false, msg: invalido });
 
     try {
-        // Se gasta un Pop gratis, también si es Administración; solo su botón
-        // "Crear sin costo" (sin_costo) crea sin gastar ninguno.
-        const gastaGratis = !(req.esAdmin && req.body?.sin_costo === true);
-        if (gastaGratis) {
-            const { data: hayEvento, error: rpcError } = await supabase
-                .rpc('consumir_evento_flash_gratis', { p_planner_id: req.plannerId });
-            if (rpcError) return res.status(500).json({ ok: false, msg: rpcError.message });
-            if (!hayEvento) return res.status(409).json({ ok: false, msg: 'Ya no tienes Pops gratis disponibles' });
+        // Modo prueba (solo Administración, `prueba: true`; iattend-vite
+        // PlannerPopFlow → MODO_PRUEBA_POP): no escribe nada en la base ni crea
+        // cuentas. "A mi cliente" / Enviar ahora manda el correo "Tu Pop está
+        // listo" de ejemplo, pero solo al del dueño (CORREO_DEL_DUENIO).
+        if (req.body?.prueba === true) {
+            if (!req.esAdmin) return res.status(403).json({ ok: false, msg: 'El modo prueba es solo de Administración' });
+            if (datos.destino === 'ahora') {
+                // El mismo correo de acceso que recibiría el cliente (cuenta nueva).
+                const { CORREO_DEL_DUENIO } = require('../middlewares/validar-duenio');
+                const { enviarAccesoPop } = require('../helpers/clientEvent');
+                await enviarAccesoPop({ correo: CORREO_DEL_DUENIO, password: 'PRUEBA-0000' });
+            }
+            return res.status(200).json({ ok: true, prueba: true, side_event_id: null, correo_prueba: datos.destino === 'ahora' });
+        }
+
+        if (datos.destino !== 'mio') {
+            const { data: planCuenta, error: errPlan } = await supabase.rpc('pops_plan_de', { p_user_id: req.plannerId });
+            if (!errPlan && planCuenta !== 'plus') {
+                return res.status(402).json({ ok: false, code: 'POPS_PLUS', msg: 'Mandar un Pop a tu cliente es de Pops+' });
+            }
         }
 
         let pop;
         try {
-            pop = await crearPopEvent(datos, { plannerId: req.plannerId, plannerEmail: req.plannerEmail, sinPlanner: req.esPlanner === false });
+            pop = await crearPopEvent(datos, { plannerId: req.plannerId, plannerEmail: req.plannerEmail, sinPlanner: req.esPlanner === false, popsPlus: false });
         } catch (error) {
-            if (gastaGratis) await supabase.rpc('devolver_evento_flash_gratis', { p_planner_id: req.plannerId });
             return res.status(500).json({ ok: false, msg: error.message });
         }
 
@@ -327,7 +349,7 @@ const crearPopGratis = async (req, res = response) => {
             estado: 'completado',
             plan: 'flash',
             monto: 0,
-            payload: { ...datos, ...(req.esAdmin ? { creadoPorAdmin: true } : {}), ...(!gastaGratis ? { sinCosto: true } : {}), ...(req.esPlanner === false ? { cliente: true } : {}) },
+            payload: { ...datos, ...(req.esAdmin ? { creadoPorAdmin: true } : {}), ...(req.esPlanner === false ? { cliente: true } : {}) },
             completed_at: new Date().toISOString(),
         });
         if (logError) console.error('No se pudo registrar el Pop gratis:', logError.message);

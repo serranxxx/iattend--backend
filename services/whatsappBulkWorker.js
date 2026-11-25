@@ -79,9 +79,12 @@ const markSideGuestAsInvited = async (guestId) => {
 // mismo registro que el recordatorio individual (sendWhatsappReminder) —
 // invitation_reminder_dispatches + contador en el titular — y NO se toca
 // guests.state: el invitado ya confirmado sigue confirmado.
+// En un Pop (item.side_event_id) el invitado es de side_events_guests y ahí
+// van los contadores (como sendWhatsappReminder con sideEventId).
 const registerReminder = async (item, batch, data) => {
+  const counterTable = item.side_event_id ? 'side_events_guests' : 'guests';
   const { data: guestRow } = await supabase
-    .from('guests')
+    .from(counterTable)
     .select('reminder_count')
     .eq('id', item.guest_id)
     .maybeSingle();
@@ -92,6 +95,7 @@ const registerReminder = async (item, batch, data) => {
     .from('invitation_reminder_dispatches')
     .insert({
       invitation_id: item.invitation_id,
+      side_event_id: item.side_event_id ?? null,
       guest_id: item.guest_id,
       guest_name: item.guest_name || null,
       guest_phone: item.guest_phone,
@@ -109,7 +113,7 @@ const registerReminder = async (item, batch, data) => {
   if (dispatchError) console.error('[bulk] error guardando recordatorio:', dispatchError.message);
 
   const { error: counterError } = await supabase
-    .from('guests')
+    .from(counterTable)
     .update({ reminder_count: reminderNumber, last_reminder_at: new Date().toISOString() })
     .eq('id', item.guest_id);
 
