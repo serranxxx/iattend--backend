@@ -169,6 +169,7 @@ function credencialesApple() {
  * @param {string} [data.expirationDate]      ISO: después de esa fecha el pase sale vencido.
  * @param {string} [data.groupingIdentifier]  Agrupa los pases del mismo evento.
  * @param {string} [data.eventStartDate]      ISO, para semantics.
+ * @param {string} [data.eventEndDate]        ISO (hora de fin), para semantics.
  * @param {{name?: string, latitude?: number, longitude?: number, region?: string}} [data.venue]
  * @param {string|number} [data.asiento]     Columna de la derecha ("Seat"/"Asiento"; la etiqueta la pone Apple).
  * @param {string} [data.textoPie]           Renglón de abajo (semantics.venueName); sin él, el lugar.
@@ -177,7 +178,7 @@ function credencialesApple() {
  */
 async function generateWalletPass({
     guestId, guestName, eventName, eventDate, eventTime, tableNumber, coverImageUrl, primaryColor, accentColor, auxFields,
-    serialNumber, authenticationToken, webServiceURL, backFields, relevantDates, locations, expirationDate, groupingIdentifier, eventStartDate, venue,
+    serialNumber, authenticationToken, webServiceURL, backFields, relevantDates, locations, expirationDate, groupingIdentifier, eventStartDate, eventEndDate, venue,
     asiento, textoPie, infoAdicional,
 }) {
     const { p12Buffer, wwdrBuffer, passphrase } = credencialesApple();
@@ -230,6 +231,7 @@ async function generateWalletPass({
             ...(textoPie ? {} : { attendeeName: guestName }),
             silenceRequested: false,
             ...(eventStartDate ? { eventStartDate } : {}),
+            ...(eventEndDate ? { eventEndDate } : {}),
             // Renglón de abajo del diseño nuevo.
             ...(textoPie || venue?.name ? { venueName: String(textoPie || venue.name) } : {}),
             ...(venue?.region ? { venueRegionName: venue.region, venueRoom: 'Acceso general' } : {}),

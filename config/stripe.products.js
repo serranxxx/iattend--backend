@@ -27,8 +27,14 @@ const PRICE_IDS = {
   BUCKET_5_POPS:    'price_1UaH4PAAdNlITNVbL15skW9Y',   // $2,249 (solo contado)
   BUCKET_10_POPS:   'price_1UaHjdAAdNlITNVbv6j6JQKZ',   // $4,000 (contado o a meses)
 
-  // Upgrade
-  UPGRADE_TO_PRO:   'price_1TlC4RAAdNlITNVbjcRtexSy',
+  // Upgrade (pagas solo la diferencia). Cada uno solo se cobra si la
+  // invitación está en el plan `desde` (controllers/payment.js).
+  UPGRADE_TO_PRO:   'price_1TlC4RAAdNlITNVbjcRtexSy',   // $1,100 — Lite → PRO
+  // Upsell de los dashboards Lite / Paperless. Live: prod_VhUHtqxFq0KXxh /
+  // prod_VhUHE9CnzG8xM3 (metadata upgrade_from / upgrade_to). Los mismos en
+  // iattend-vite, Payment/functions.js.
+  UPGRADE_PAPERLESS_TO_LITE: 'price_1Ug5IsAAdNlITNVb4Xa0d98W', // $2,050
+  UPGRADE_PAPERLESS_TO_PRO:  'price_1Ug5ItAAdNlITNVbxZ9HtdVw', // $3,150
 
   // Side events
   SIDE_EVENT:       'price_1Tl9kwAAdNlITNVbqroYr991',   // $300
@@ -95,7 +101,9 @@ const PRODUCTS = {
   [PRICE_IDS.BUCKET_5_POPS]:   { type: 'pops', value: 5 },
   [PRICE_IDS.BUCKET_10_POPS]:  { type: 'pops', value: 10 },
 
-  [PRICE_IDS.UPGRADE_TO_PRO]:  { type: 'plan', value: 'pro' },
+  [PRICE_IDS.UPGRADE_TO_PRO]:  { type: 'plan', value: 'pro', desde: 'lite' },
+  ...(PRICE_IDS.UPGRADE_PAPERLESS_TO_LITE ? { [PRICE_IDS.UPGRADE_PAPERLESS_TO_LITE]: { type: 'plan', value: 'lite', desde: 'paperless' } } : {}),
+  ...(PRICE_IDS.UPGRADE_PAPERLESS_TO_PRO ? { [PRICE_IDS.UPGRADE_PAPERLESS_TO_PRO]: { type: 'plan', value: 'pro', desde: 'paperless' } } : {}),
 
   [PRICE_IDS.SIDE_EVENT]:      { type: 'side', value: 'side_event' },
   [PRICE_IDS.SIDE_EVENT_ALT]:  { type: 'side', value: 'side_event' },

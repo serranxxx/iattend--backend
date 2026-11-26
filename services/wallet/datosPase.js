@@ -156,7 +156,9 @@ async function asegurarPase({ kind, invitationId, sideEventId, guestId, eventoFe
 }
 
 // Lo común de los dos tipos: actualizaciones, reverso, fechas y lugares.
-async function completar(base, { fila, eventoFecha, lugares, itinerario, linkInvitacion, grupo, fechas }) {
+// `fines` (opcional, alineada con `fechas`): instante ISO de la hora de fin de
+// cada fecha (side event / Pop con `body.ends`), o null.
+async function completar(base, { fila, eventoFecha, lugares, itinerario, linkInvitacion, grupo, fechas, fines }) {
     const conServicio = Boolean(URL_SERVICIO && fila);
 
     const backFields = [];
@@ -193,11 +195,13 @@ async function completar(base, { fila, eventoFecha, lugares, itinerario, linkInv
     const principal = conLink.find((l) => l.principal) ?? conLink[conLink.length - 1];
 
     const inicios = (fechas?.length ? fechas : [eventoFecha]).filter(Boolean);
-    const relevantDates = inicios.map((f) => ({
+    // Con hora de fin, el pase es relevante hasta una hora después de ella.
+    const relevantDates = inicios.map((f, i) => ({
         startDate: new Date(new Date(f).getTime() - 3 * HORA).toISOString(),
-        endDate: new Date(new Date(f).getTime() + 12 * HORA).toISOString(),
+        endDate: new Date(fines?.[i] ? new Date(fines[i]).getTime() + HORA : new Date(f).getTime() + 12 * HORA).toISOString(),
     }));
-    const ultimo = inicios.length ? Math.max(...inicios.map((f) => new Date(f).getTime())) : null;
+    const ultimo = inicios.length ? Math.max(...inicios.map((f, i) => new Date(fines?.[i] || f).getTime())) : null;
+    const finEvento = fines?.length ? fines[fines.length - 1] : null;
 
     return {
         ...base,
@@ -214,6 +218,7 @@ async function completar(base, { fila, eventoFecha, lugares, itinerario, linkInv
         // Dos días después del evento sale como vencido.
         ...(ultimo ? { expirationDate: new Date(ultimo + 48 * HORA).toISOString() } : {}),
         ...(eventoFecha ? { eventStartDate: eventoFecha } : {}),
+        ...(finEvento ? { eventEndDate: finEvento } : {}),
         ...(principal ? { venue: { name: principal.maps?.nombre || principal.nombre || principal.direccion, latitude: principal.maps?.lat, longitude: principal.maps?.lng, region: principal.region || undefined } } : {}),
     };
 }
@@ -305,7 +310,13 @@ async function datosPaseSide(eventId, guestId) {
     const hora = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(String(body.hour ?? ''));
     if (!hora) return null;
     const zona = zonaDe(body);
-    const fechas = (Array.isArray(body.dates) && body.dates.length ? body.dates : [body.hour]).map((f) => instanteDePared(f, zona)).filter(Boolean);
+    const paredes = (Array.isArray(body.dates) && body.dates.length ? body.dates : [body.hour]).filter((f) => instanteDePared(f, zona));
+    const fechas = paredes.map((f) => instanteDePared(f, zona));
+    // Hora de fin de cada fecha (vite → barra de fecha; `body.ends` =
+    // { "YYYY-MM-DD" de inicio: hora de pared, puede ser del día siguiente}).
+    const ends = body.ends && typeof body.ends === 'object' ? body.ends : {};
+    const fines = paredes.map((f) => (ends[String(f).slice(0, 10)] ? instanteDePared(ends[String(f).slice(0, 10)], zona) : null));
+    const horaFin = /[ T](\d{2}:\d{2})/.exec(String(ends[hora[1]] ?? ''))?.[1];
     const eventoFecha = fechas[0] ?? null;
 
     const acompanantes = await acompanantesDe('side_events_guests', guest.id);
@@ -324,7 +335,7 @@ async function datosPaseSide(eventId, guestId) {
 
     const a = body.address;
     const direccion = textoDireccion({ street: a?.street, number: a?.number, neighborhood: a?.neighborhood, city: a?.city, state: a?.state });
-    const lugares = direccion ? [{ nombre: body.place_name || null, hora: hora12(hora[2]), direccion, url: a?.url || null, region: regionDe(a) }] : [];
+    const lugares = direccion ? [{ nombre: body.place_name || null, hora: [hora12(hora[2]), horaFin ? hora12(horaFin) : null].filter(Boolean).join(' – '), direccion, url: a?.url || null, region: regionDe(a) }] : [];
     const itinerario = (body.itinerary ?? []).filter((m) => m.name)
         .map((m) => [m.time ? hora12(m.time) || m.time : null, m.name, m.place ? `— ${m.place}` : null].filter(Boolean).join('  '));
 
@@ -353,7 +364,7 @@ async function datosPaseSide(eventId, guestId) {
         }),
     };
     const datos = await completar(base, {
-        fila, eventoFecha, fechas, lugares, itinerario,
+        fila, eventoFecha, fechas, fines, lugares, itinerario,
         // Código público del evento (no el número): side_events.public_code.
         linkInvitacion: `${URL_EVENTOS}/side-event/${evento.public_code || evento.id}`,
         grupo: `side-${evento.id}`,

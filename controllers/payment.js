@@ -76,6 +76,24 @@ router.post("/create-checkout", async (req, res) => {
       });
     }
 
+    // Upgrade (pagas solo la diferencia): solo desde el plan del que sale el
+    // precio. Si no, una invitación Paperless o free podía subir a PRO con el
+    // precio de Lite → PRO.
+    const desde = PRODUCTS[priceId]?.desde;
+    if (desde) {
+      const { data: inv } = await supabase
+        .from("invitations")
+        .select("plan")
+        .eq("id", invitationId)
+        .maybeSingle();
+      if (String(inv?.plan ?? "").toLowerCase() !== desde) {
+        return res.status(409).json({
+          error: "Este cambio de plan no aplica a tu invitación.",
+          code: "UPGRADE_NO_APLICA",
+        });
+      }
+    }
+
     // Side events sueltos: solo si el plan de la invitación los permite (hoy
     // Lite ya no puede comprarlos; tiene que subir a PRO).
     if (PRODUCTS[priceId]?.type === "side") {

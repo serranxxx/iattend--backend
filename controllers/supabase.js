@@ -39,7 +39,14 @@ async function createInvitationFromQueue(queueId, planName) {
     return;
   }
 
-  const { user_id, user_email, data } = entry;
+  const { user_id, user_email } = entry;
+  // La copia de la vista previa trae el nombre (= URL) de la invitación de
+  // muestra ("test"). Nace sin nombre: el organizador lo elige en el front
+  // (Header pide nombre si falta). La etiqueta sí se conserva.
+  const data = entry.data || {};
+  if (data?.generals?.event) {
+    data.generals.event = { ...data.generals.event, name: null };
+  }
 
   const entitlements = await planEntitlements(planName);
 
@@ -48,7 +55,7 @@ async function createInvitationFromQueue(queueId, planName) {
     user_email: user_email || null,
     plan: planName,
     label: data?.generals?.event?.label || null,
-    name: data?.generals?.event?.name || null,
+    name: null,
     phone_number: null,
     type: "closed",
     active: true,
@@ -451,6 +458,15 @@ async function activatePlan(invitationId, planName) {
   // Stripe reintenta el webhook: si el plan ya quedó activo, no se vuelven a
   // sumar créditos.
   if (current.active && String(current.plan).toLowerCase() === planName) return;
+
+  // Un pago de upgrade nunca baja el plan (p. ej. un Paperless → Lite que se
+  // cobra después de un Paperless → PRO de la misma invitación).
+  const RANGO = { free: 0, paperless: 1, lite: 2, pro: 3 };
+  const actual = RANGO[String(current.plan).toLowerCase()];
+  if (current.active && actual != null && RANGO[planName] != null && actual > RANGO[planName]) {
+    console.error(`Plan no aplicado: la invitación ${invitationId} ya es ${current.plan} (pago de ${planName})`);
+    return;
+  }
 
   const plan = await getPlan(planName);
   const credits = plan?.credits_included ?? 0;
